@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# 发版需要写 Release：GITHUB_TOKEN 最小必要写权限（无 PAT 依赖）
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 构建 6 平台二进制并发布
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 版本一致性断言（tag ↔ --version 注入）
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          case "$VER" in *-*) echo "::error::tag 携带预发布后缀以外内容，请检查"; exit 1;; esac
+          echo "VER=$VER" >> "$GITHUB_ENV"
+      - name: 交叉编译（linux/darwin/windows × amd64/arm64）
+        run: |
+          mkdir -p dist
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              name="leakgoose_${VER}_${os}_${arch}"
+              GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build \
+                -trimpath -ldflags "-s -w -X main.version=${VER}" \
+                -o "dist/leakgoose" .
+              if [ "$os" = "windows" ]; then
+                mv dist/leakgoose "dist/leakgoose.exe"
+                (cd dist && zip -q "${name}.zip" leakgoose.exe && rm leakgoose.exe)
+              else
+                tar -czf "dist/${name}.tar.gz" -C dist leakgoose && rm dist/leakgoose
+              fi
+            done
+          done
+          (cd dist && sha256sum * > checksums.txt)
+          ls -la dist/
+      - name: 冒烟验证（linux/amd64 二进制真实跑一遍规则加载）
+        run: |
+          tar -xzf "dist/leakgoose_${VER}_linux_amd64.tar.gz" -C /tmp
+          /tmp/leakgoose version
+          /tmp/leakgoose rules | grep -q "共 15 条规则"
+      - name: 创建 Release 并上传构件（幂等：已存在则复用）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id 2>/dev/null || true)
+          if [ -z "$RID" ]; then
+            RID=$(gh release create "$GITHUB_REF_NAME" --title "LeakGoose ${GITHUB_REF_NAME}" \
+              --generate-notes --repo "$GITHUB_REPOSITORY" | grep -oE '[0-9]+' | tail -1)
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
