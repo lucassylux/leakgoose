@@ -57,7 +57,7 @@ rules:
   - id: password-assignment
     name: 配置中的口令赋值（password/secret/api_key/token = 字面量）
     severity: medium
-    pattern: '(?i)(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|token)[''\"]?\s*[:=]\s*[''\"][^''\"\s]{8,}[''\"]'
+    pattern: '(?i)(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|token)[''\"]?\s*[:=]\s*[''\"](?![^''\"]*(?:secret|password|passwd|token|key))[^''\"\s]{8,}[''\"]'
 
   - id: jwt-token
     name: JWT（三段式；含公开 id_token，人审判断）
