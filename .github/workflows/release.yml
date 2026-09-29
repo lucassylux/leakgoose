@@ -52,9 +52,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id 2>/dev/null || true)
-          if [ -z "$RID" ]; then
-            RID=$(gh release create "$GITHUB_REF_NAME" --title "LeakGoose ${GITHUB_REF_NAME}" \
-              --generate-notes --repo "$GITHUB_REPOSITORY" | grep -oE '[0-9]+' | tail -1)
-          fi
+          # 幂等：Release 已存在（失败重跑）则复用；--clobber 覆盖同名附件
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "LeakGoose ${GITHUB_REF_NAME}" \
+                 --generate-notes --repo "$GITHUB_REPOSITORY"
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
