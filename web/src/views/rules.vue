@@ -1,17 +1,21 @@
 <template>
-  <div>
+  <SkCard title="规则维护">
     <search-form>
-      <SkFormField name="f">
-        <SkInput v-model="query.q" placeholder="规则 id / 名称" clearable @keyup.enter="load" />
+      <SkFormField label="ID / 名称" name="f">
+        <SkInput v-model="query.q" placeholder="请输入" clearable @keyup.enter="load" />
       </SkFormField>
-      <SkFormField name="f">
-        <SkSelect v-model="query.enabled" placeholder="启停（全部）" clearable :options="enabledOptions" />
+      <SkFormField label="启停" name="f">
+        <SkSelect v-model="query.enabled" placeholder="全部" clearable :options="enabledOptions" />
       </SkFormField>
       <SkFormField name="f">
         <SkButton variant="primary" @click="load">查询</SkButton>
-        <SkButton variant="primary" style="margin-left: 8px" @click="openEdit(null)">新建规则</SkButton>
+        <SkButton style="margin-left: 8px" @click="reset">重置</SkButton>
       </SkFormField>
     </search-form>
+
+    <span class="sk-space toolbar" style="margin: 0 0 12px">
+      <SkButton variant="primary" @click="openEdit(null)">新建规则</SkButton>
+    </span>
 
     <SkTable :columns="columns" :data="rows" :loading="loading" row-key="id" size="md" :scroll-x="1100">
       <template #bodyCell="{ column, record }">
@@ -106,7 +110,7 @@
         <SkButton variant="primary" :loading="saving" style="margin-left: 8px" @click="save">保存草稿</SkButton>
       </template>
     </SkModal>
-  </div>
+  </SkCard>
 </template>
 
 <script setup lang="ts">
@@ -185,6 +189,11 @@ const load = async () => {
   } finally {
     loading.value = false
   }
+}
+const reset = () => {
+  query.q = ''
+  query.enabled = null
+  load()
 }
 onMounted(() => { loadSevDict(); load() })
 
