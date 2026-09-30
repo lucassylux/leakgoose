@@ -1,7 +1,7 @@
 <template>
   <div class="dict-layout">
     <!-- 左：字典类型 -->
-    <SkCard title="字典类型" class="type-card">
+    <SkCard title="字典类型" class="fill-card type-card">
       <SkTable :columns="typeCols" :data="types" :loading="loadingTypes" row-key="type" size="sm"
         :highlight-current-row="true" @row-click="pickType">
         <template #bodyCell="{ column, record }">
@@ -14,7 +14,7 @@
     </SkCard>
 
     <!-- 右：选中类型的字典项 -->
-    <SkCard class="items-card">
+    <SkCard class="fill-card items-card">
       <template #title>
         字典项<span v-if="current" class="cur-type"> · {{ current.name }}（{{ current.type }}）</span>
       </template>
@@ -161,10 +161,14 @@ const removeItem = async (id: number) => {
 </script>
 
 <style scoped>
-.dict-layout { display: flex; gap: 14px; align-items: flex-start; }
-.type-card { width: 380px; flex: none; }
-.items-card { flex: 1; min-width: 0; }
+/* 主从双栏等高占满（看门鹅 page-cols 同款）；窄屏堆叠退回自然生长 */
+.dict-layout { display: flex; gap: 14px; height: 100%; }
+.dict-layout > .type-card { width: 380px; flex: none; }
+.dict-layout > .items-card { flex: 1; min-width: 0; }
 .cur-type { font-weight: 400; font-size: 13px; color: var(--sk-text-muted); }
 .empty-tip { padding: 18px 0; text-align: center; color: var(--sk-text-faint); font-size: 12px; }
-@media (max-width: 900px) { .dict-layout { flex-direction: column; } .type-card { width: 100%; } }
+@media (max-width: 900px) {
+  .dict-layout { flex-direction: column; height: auto; }
+  .dict-layout > .type-card { width: 100%; }
+}
 </style>

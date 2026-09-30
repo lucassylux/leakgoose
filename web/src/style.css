@@ -32,3 +32,24 @@ pre.code {
   font-size: 12px;
   line-height: 1.6;
 }
+
+/* ── 列表页卡片占满内容区：表体内部滚动（数据少时卡片不再缩成一截）──
+ * 高度链：content(flex:1) > 页面根(height:100%) > .fill-card(height:100%) > sk-table-wrap(flex:1) 内部滚动
+ * （与看门鹅管理台同款实现） */
+.fill-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.fill-card > .sk-card-title {
+  flex: none;
+}
+.fill-card > .sk-form {
+  flex: none;
+}
+.fill-card > .sk-table-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
