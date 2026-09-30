@@ -33,21 +33,23 @@
         </template>
       </div>
 
-      <div class="foot">© {{ new Date().getFullYear() }} LeakGoose · 扫描在本地，规则集中管</div>
+      <div class="foot">© {{ year }} LeakGoose · v{{ version }}</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { skMessage } from '@xzsoft/sketch-ui'
 import GooseLogo from '../components/GooseLogo.vue'
 import { api, type Me } from '../api'
 import { markSession } from '../router'
+import { version } from '../../package.json'
 
 const router = useRouter()
 const route = useRoute()
+const year = computed(() => new Date().getFullYear())
 const loading = ref(false)
 const username = ref('')
 const password = ref('')
@@ -124,8 +126,12 @@ const doLogin = async () => {
 .divider::before, .divider::after { content: ''; flex: 1; border-top: var(--sk-border-divider, 1px solid #e5e7eb); }
 .sso-icon { width: 14px; height: 14px; }
 
+/* 页脚与看门鹅登录页同款：11px / 字距 2px */
 .foot {
-  margin-top: 18px; text-align: center;
-  color: var(--sk-text-faint, #aaa); font-size: var(--sk-font-size-xs, 12px);
+  margin-top: 26px;
+  text-align: center;
+  color: var(--sk-text-faint, #888);
+  font-size: 11px;
+  letter-spacing: 2px;
 }
 </style>
