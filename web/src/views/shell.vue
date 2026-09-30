@@ -20,6 +20,7 @@
         <SkSidebarItem :icon="SkIconUpload" label="发布与版本" :active="route.path === '/publish'" @click="goPage('/publish')">发布与版本</SkSidebarItem>
         <SkSidebarItem :icon="SkIconHistory" label="审计日志" :active="route.path === '/audit'" @click="goPage('/audit')">审计日志</SkSidebarItem>
         <SkSidebarItem :icon="SkIconLink" label="接入与令牌" :active="route.path === '/access'" @click="goPage('/access')">接入与令牌</SkSidebarItem>
+        <SkSidebarItem :icon="SkIconLock" label="系统设置" :active="route.path === '/settings'" @click="goPage('/settings')">系统设置</SkSidebarItem>
       </SkSidebarGroup>
     </SkSidebar>
 
@@ -58,6 +59,7 @@ import {
   SkIconHistory,
   SkIconLink,
   SkIconMenu,
+  SkIconLock,
   SkIconChevronDown,
 } from '@xzsoft/sketch-ui/icons'
 import GooseLogo from '../components/GooseLogo.vue'
@@ -94,6 +96,7 @@ const crumbsMap: Record<string, string[]> = {
   '/publish': ['规则中心', '发布与版本'],
   '/audit': ['规则中心', '审计日志'],
   '/access': ['规则中心', '接入与令牌'],
+  '/settings': ['规则中心', '系统设置'],
 }
 const crumbs = computed(() => crumbsMap[route.path] ?? [])
 const avatarChar = computed(() => (me.value?.username || 'U').slice(0, 1).toUpperCase())

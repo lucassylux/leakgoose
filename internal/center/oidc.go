@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"net/url"
 
 	"os"
 	"strings"
@@ -322,4 +323,77 @@ func oidcNewPair() (state, verifier string, err error) {
 func oidcS256(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// handleOidcSettingsGet GET /api/auth/oidc/settings（仅 admin）：当前 SSO 配置。
+// secret 只回"是否已设置"，值永不回传
+func (s *Server) handleOidcSettingsGet(w http.ResponseWriter, _ *http.Request, _ *User) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issuer":          s.store.SettingGet("oidc_issuer"),
+		"clientId":        s.store.SettingGet("oidc_client_id"),
+		"clientSecretSet": s.store.SettingGet("oidc_client_secret") != "",
+		"redirectBase":    s.store.SettingGet("oidc_redirect_base"),
+		"allowedUsers":    s.store.SettingGet("oidc_allowed_users"),
+		"adminUsers":      s.store.SettingGet("oidc_admin_users"),
+		"enabled":         s.store.oidcEnabled(),
+	})
+}
+
+// handleOidcSettingsPut PUT /api/auth/oidc/settings（仅 admin）：整组维护。
+// 字段 nil = 不改；空串 = 清除（issuer/client_id 清空或白名单清空即停用 SSO）；
+// secret 空串 = 不改，"-" = 清除（公开客户端）。配置变更即时生效（运行时缓存按值失效）
+func (s *Server) handleOidcSettingsPut(w http.ResponseWriter, r *http.Request, _ *User) {
+	var req struct {
+		Issuer       *string `json:"issuer"`
+		ClientID     *string `json:"clientId"`
+		ClientSecret *string `json:"clientSecret"`
+		RedirectBase *string `json:"redirectBase"`
+		AllowedUsers *string `json:"allowedUsers"`
+		AdminUsers   *string `json:"adminUsers"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	for _, v := range []struct{ name, raw string }{
+		{"issuer", deref(req.Issuer)},
+		{"回调基准地址", deref(req.RedirectBase)},
+	} {
+		if v.raw != "" && !oidcIssuerValid(v.raw) {
+			writeErr(w, http.StatusBadRequest, v.name+" 需为完整 http(s) 地址")
+			return
+		}
+	}
+	set := func(key string, p *string) {
+		if p != nil {
+			s.store.SettingSet(key, strings.TrimSpace(*p))
+		}
+	}
+	set("oidc_issuer", req.Issuer)
+	set("oidc_client_id", req.ClientID)
+	set("oidc_redirect_base", req.RedirectBase)
+	set("oidc_allowed_users", req.AllowedUsers)
+	set("oidc_admin_users", req.AdminUsers)
+	if req.ClientSecret != nil {
+		v := strings.TrimSpace(*req.ClientSecret)
+		if v == "-" {
+			s.store.SettingSet("oidc_client_secret", "")
+		} else if v != "" {
+			s.store.SettingSet("oidc_client_secret", v)
+		}
+	}
+	_ = s.store.Audit(s.sessionUser(r).Username, "update", "settings/oidc", "")
+	s.handleOidcSettingsGet(w, r, nil)
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
+}
+
+// oidcIssuerValid http(s) 完整地址形状校验
+func oidcIssuerValid(v string) bool {
+	u, err := url.Parse(v)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }

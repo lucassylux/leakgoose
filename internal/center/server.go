@@ -51,6 +51,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/oidc/config", s.handleOidcConfig)
 	mux.HandleFunc("GET /api/auth/oidc/login", s.handleOidcLogin)
 	mux.HandleFunc("POST /api/auth/oidc/callback", s.handleOidcCallback)
+	mux.HandleFunc("GET /api/auth/oidc/settings", s.requireRole("admin", s.handleOidcSettingsGet))
+	mux.HandleFunc("PUT /api/auth/oidc/settings", s.requireRole("admin", s.handleOidcSettingsPut))
 
 	// 规则（UI 会话）
 	mux.HandleFunc("GET /api/rules", s.requireUI(s.handleListRules))

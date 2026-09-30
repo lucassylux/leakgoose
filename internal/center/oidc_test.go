@@ -3,6 +3,7 @@ package center
 import (
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,3 +136,95 @@ type captureWriter struct{ code int }
 func (w *captureWriter) Header() http.Header         { return http.Header{} }
 func (w *captureWriter) Write(b []byte) (int, error) { return len(b), nil }
 func (w *captureWriter) WriteHeader(code int)        { w.code = code }
+
+func TestOidcSettingsAPI(t *testing.T) {
+	app := newTestApp(t)
+	// 非登录态 401
+	req, _ := http.NewRequest(http.MethodGet, app.srv.URL+"/api/auth/oidc/settings", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("未登录应 401，实得 %v %v", resp, err)
+	}
+	resp.Body.Close()
+
+	// 空库默认值：未启用、secret 未设置
+	code, m, _ := app.do("GET", "/api/auth/oidc/settings", nil)
+	if code != 200 || m["enabled"] != false || m["clientSecretSet"] != false {
+		t.Fatalf("默认设置: code=%d %v", code, m)
+	}
+
+	// 写入（含 issuer 形状校验拒绝）
+	if code, m, _ = app.do("PUT", "/api/auth/oidc/settings", map[string]any{"issuer": "not-a-url"}); code != 400 {
+		t.Fatalf("坏 issuer 应 400: %d %v", code, m)
+	}
+	code, m, _ = app.do("PUT", "/api/auth/oidc/settings", map[string]any{
+		"issuer":       "http://localhost:8080",
+		"clientId":     "leakgoose-center",
+		"clientSecret": "s3cret",
+		"allowedUsers": "admin, bob",
+		"adminUsers":   "admin",
+	})
+	if code != 200 {
+		t.Fatalf("保存设置: %d %v", code, m)
+	}
+	if m["clientSecretSet"] != true {
+		t.Fatalf("secret 应显示已设置")
+	}
+	if _, has := m["clientSecret"]; has {
+		t.Fatalf("secret 值不得回传")
+	}
+	if m["enabled"] != true {
+		t.Fatalf("白名单非空应启用: %v", m)
+	}
+
+	// secret 空串 = 不改；"-" = 清除
+	app.do("PUT", "/api/auth/oidc/settings", map[string]any{"clientSecret": ""})
+	_, m, _ = app.do("GET", "/api/auth/oidc/settings", nil)
+	if m["clientSecretSet"] != true {
+		t.Fatal("空串 secret 不应清除")
+	}
+	app.do("PUT", "/api/auth/oidc/settings", map[string]any{"clientSecret": "-"})
+	_, m, _ = app.do("GET", "/api/auth/oidc/settings", nil)
+	if m["clientSecretSet"] != false {
+		t.Fatal("'-' 应清除 secret")
+	}
+
+	// 清空白名单 → SSO 停用
+	app.do("PUT", "/api/auth/oidc/settings", map[string]any{"allowedUsers": ""})
+	_, m, _ = app.do("GET", "/api/auth/oidc/settings", nil)
+	if m["enabled"] != false {
+		t.Fatal("白名单清空应停用 SSO")
+	}
+}
+
+func TestSeedRules(t *testing.T) {
+	store, _, err := Open(filepath.Join(t.TempDir(), "center.db"), "seed-pw")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	builtin, err := os.ReadFile(filepath.Join("..", "..", "rules", "builtin.yaml"))
+	if err != nil {
+		t.Fatalf("读内置规则: %v", err)
+	}
+	if err := store.SeedRules(builtin); err != nil {
+		t.Fatalf("SeedRules: %v", err)
+	}
+	list, err := store.ListRules("", nil)
+	if err != nil || len(list) == 0 {
+		t.Fatalf("种子后应有规则: %d %v", len(list), err)
+	}
+	// 二次种子不重复（幂等）
+	if err := store.SeedRules(builtin); err != nil {
+		t.Fatalf("二次 SeedRules: %v", err)
+	}
+	list2, _ := store.ListRules("", nil)
+	if len(list2) != len(list) {
+		t.Fatalf("二次种子不应追加: %d != %d", len(list2), len(list))
+	}
+	// 演示用例已挂
+	cases, err := store.ListCases("cn-mobile")
+	if err != nil || len(cases) != 2 {
+		t.Fatalf("cn-mobile 演示用例: %d %v", len(cases), err)
+	}
+}

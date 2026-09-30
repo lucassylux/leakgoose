@@ -295,6 +295,12 @@ func runCenterServe(args []string) int {
 	if generated != "" {
 		fmt.Printf("=== 首次启动：管理员账号 admin，初始口令（仅此一次显示，请立即登录）: %s ===\n", generated)
 	}
+	// 首启种子：规则表为空时导入内置规则包为草稿（含演示用例）
+	if builtinYAML, err := loadBuiltin(false); err == nil {
+		if err := store.SeedRules(builtinYAML); err != nil {
+			fmt.Fprintf(os.Stderr, "leakgoose: 种子规则导入失败: %v\n", err)
+		}
+	}
 	var uifs = center.SubFS(centerUI, "web/dist")
 	if *uiDir != "" {
 		uifs = center.DirFS(*uiDir)

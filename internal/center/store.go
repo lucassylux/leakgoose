@@ -263,6 +263,52 @@ func (s *Store) UpsertSSOUser(username, subject, role string) (*User, error) {
 
 // ---------- 设置（键值） ----------
 
+// SeedRules 首启种子规则：规则表为空时把内置规则包导入为草稿（含演示用例），
+// 新中心开箱即有可维护/可发布的内容，而非空白
+func (s *Store) SeedRules(builtinYAML []byte) error {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM rules`).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	set, err := rules.Load(builtinYAML, nil)
+	if err != nil {
+		return fmt.Errorf("解析内置规则: %w", err)
+	}
+	for _, r := range set.Rules {
+		draft := &Rule{
+			RID: r.ID, Name: r.Name, Severity: r.Severity, Pattern: r.Pattern,
+			Validate: r.Validate, Keywords: r.Keywords,
+			IncludePaths: r.IncludePaths, ExcludePaths: r.ExcludePaths,
+			Enabled: true, UpdatedBy: "seed",
+		}
+		if err := s.UpsertRule(draft, "seed"); err != nil {
+			return err
+		}
+	}
+	// 演示用例：让「用例回归门禁」与编辑器用例区开箱可演示
+	demo := map[string][]TestCase{
+		"cn-id-card": {
+			{RuleRID: "cn-id-card", Input: "身份证号 11010519491231002X", ExpectMatch: true},
+		},
+		"cn-mobile": {
+			{RuleRID: "cn-mobile", Input: "联系电话 13800138000", ExpectMatch: true},
+			{RuleRID: "cn-mobile", Input: "工单号 2026093012345", ExpectMatch: false},
+		},
+		"aliyun-access-key-id": {
+			{RuleRID: "aliyun-access-key-id", Input: "LTAI5tFakeKeyForDemo00k", ExpectMatch: true},
+		},
+	}
+	for rid, cases := range demo {
+		if _, err := s.GetRule(rid); err == nil {
+			if err := s.ReplaceCases(rid, cases); err != nil {
+				return err
+			}
+		}
+	}
+	_ = s.Audit("seed", "create", "rules/builtin", fmt.Sprintf("首启导入内置规则 %d 条", len(set.Rules)))
+	return nil
+}
+
 // SettingGet 读设置（不存在返回空串）
 func (s *Store) SettingGet(key string) string {
 	var v string
