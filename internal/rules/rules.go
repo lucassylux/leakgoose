@@ -21,14 +21,14 @@ func SeverityRank(s string) int { return severityRank[s] }
 
 // Rule 单条敏感信息规则
 type Rule struct {
-	ID           string   `yaml:"id"`
-	Name         string   `yaml:"name"`
-	Severity     string   `yaml:"severity"`
-	Pattern      string   `yaml:"pattern"`
-	Validate     string   `yaml:"validate,omitempty"`
-	Keywords     []string `yaml:"keywords,omitempty"`
-	IncludePaths []string `yaml:"include-paths,omitempty"`
-	ExcludePaths []string `yaml:"exclude-paths,omitempty"`
+	ID           string   `yaml:"id" json:"id"`
+	Name         string   `yaml:"name" json:"name"`
+	Severity     string   `yaml:"severity" json:"severity"`
+	Pattern      string   `yaml:"pattern" json:"pattern"`
+	Validate     string   `yaml:"validate,omitempty" json:"validate,omitempty"`
+	Keywords     []string `yaml:"keywords,omitempty" json:"keywords,omitempty"`
+	IncludePaths []string `yaml:"include-paths,omitempty" json:"include-paths,omitempty"`
+	ExcludePaths []string `yaml:"exclude-paths,omitempty" json:"exclude-paths,omitempty"`
 
 	re       *regexp2.Regexp
 	includes []string

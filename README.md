@@ -14,10 +14,12 @@ gitleaks 覆盖通用凭据模式扫描；LeakGoose 在此之上补三块：
 
 ## 安装
 
-从 [Releases](https://github.com/lucassylux/leakgoose/releases) 下载对应平台二进制（linux/darwin/windows × amd64/arm64），或源码构建：
+从 [Releases](https://github.com/lucassylux/leakgoose/releases) 下载对应平台二进制（linux/darwin/windows × amd64/arm64，Release 内嵌完整规则中心 UI），或源码构建：
 
 ```bash
-go build -o leakgoose .
+go build -o leakgoose .                 # 纯扫描器（规则中心为占位页）
+# 带完整规则中心 UI：先构建前端再编译（//go:embed 内嵌 web/dist）
+cd web && npm ci && npm run build && cd .. && go build -o leakgoose .
 ```
 
 依赖：history 模式需要系统 `git`；dir/stdin 模式零依赖。
@@ -75,13 +77,50 @@ leakgoose scan -b .leakgoose/baseline.json                # 之后：命中基�
 - name: 敏感信息扫描（leakgoose，全历史 + 项目规则 + 基线）
   run: |
     curl -fsSL -o leakgoose.tar.gz \
-      https://github.com/lucassylux/leakgoose/releases/download/v0.1.0/leakgoose_0.1.0_linux_amd64.tar.gz
+      https://github.com/lucassylux/leakgoose/releases/download/v0.2.0/leakgoose_0.2.0_linux_amd64.tar.gz
     echo "<checksums.txt 中的 sha256>  leakgoose.tar.gz" | sha256sum -c
     tar xzf leakgoose.tar.gz leakgoose && install -m755 leakgoose /usr/local/bin/
     leakgoose scan --mode history --fail-severity high
 ```
 
 `--fail-severity critical|high|medium|low|all` 控制阻断阈值（默认 all：任何发现都阻断）；低于阈值的发现只展示。
+
+规则走中心下发时，CI 先拉包再扫（见下节）：
+
+```yaml
+- name: 拉取中心规则包（钉版本 + sha256 校验）
+  run: |
+    curl -fsSL -H "Authorization: Bearer $RULES_TOKEN" -o .leakgoose/center-pack.yaml \
+      "${LEAKGOOSE_CENTER}/api/packs/<版本>.yaml"
+- name: 敏感信息扫描（中心包 + 仓库叠加 + 基线）
+  run: leakgoose scan --mode history --fail-severity high \
+    -r .leakgoose/center-pack.yaml -r .leakgoose/rules.yaml -b .leakgoose/baseline.json
+```
+
+## 规则中心（v0.2+，可选）
+
+同一份二进制内置规则中心 Web 服务：页面集中维护规则、版本化发布，CI 拉取使用——规则变更即时生效，不必升级二进制：
+
+```bash
+leakgoose center serve -listen :8280 -db center.db
+# 首次启动自动创建 admin，随机初始密码打印在日志（仅此一次，登录后可改）
+```
+
+- **零外部依赖**：SQLite 单文件存储 + 前端已内嵌（源码构建带 UI 见「安装」）
+- **规则草稿 + 实时沙箱**：编辑即测（与扫描引擎同源，所测即所得）
+- **用例回归门禁**：每条规则可配「应命中 / 不应命中」用例，发布前全量回归，期望不符直接拒绝发布并逐条列出
+- **版本化规则包**：发布生成不可变版本（`YYYY.MM.DD-N`）+ sha256，YAML 快照随版本留存，可回溯可回滚
+- **审计日志**：规则变更、发布、令牌操作全记录
+- **角色与令牌**：admin / editor / viewer 三角色；CI 用独立读令牌（Bearer，明文仅创建时显示一次）
+
+CI 侧拉取：
+
+```bash
+leakgoose rules sync https://center.internal:8280/api/packs/latest --token "$RULES_TOKEN" \
+  -o .leakgoose/center-pack.yaml          # latest：跟随最新发布
+leakgoose rules sync https://center.internal:8280/api/packs/2026.09.30-1.yaml --token "$RULES_TOKEN"
+# 钉版本：URL 带具体版本号，规则变更不漂移；两者响应均含 sha256 可核对
+```
 
 ## 内置规则一览
 
@@ -90,8 +129,8 @@ PII 向：身份证号（校验位）/ 手机号（号段）/ 银行卡号（Luh
 
 ## 路线图
 
-- v0.2：SARIF 输出（GitHub Code Scanning）、增量 diff 模式（PR 扫描）、GitHub Action 封装
-- v0.3：规则中心仓库 + `leakgoose rules sync` 拉取、可选结果上报审计
+- v0.2（已完成）：规则中心（`center serve` + 内嵌 Web UI + 版本化规则包 + `rules sync`）
+- v0.3：SARIF 输出（GitHub Code Scanning）、增量 diff 模式（PR 扫描）、GitHub Action 封装、可选结果上报审计
 - v1.0：规则生态（社区 PR 规则）
 
 ## License

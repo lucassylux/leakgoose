@@ -19,6 +19,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # 规则中心 UI 先于 go build 构建：//go:embed all:web/dist 内嵌真实产物
+      # （仓库里只提交最小占位 index.html，CI/Release 在线构建完整 dist）
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 构建规则中心 Web UI
+        run: |
+          cd web
+          npm ci
+          npm run build
+          ls dist/assets | head -3
       - name: 版本一致性断言（tag ↔ --version 注入）
         run: |
           VER="${GITHUB_REF_NAME#v}"
@@ -48,6 +61,20 @@ jobs:
           tar -xzf "dist/leakgoose_${VER}_linux_amd64.tar.gz" -C /tmp
           /tmp/leakgoose version
           /tmp/leakgoose rules | grep -q "共 15 条规则"
+      - name: 冒烟验证（规则中心：嵌入 UI 可达 + pack API 鉴权生效）
+        run: |
+          /tmp/leakgoose center serve -listen 127.0.0.1:8299 -db /tmp/center-smoke.db > /tmp/center.log 2>&1 &
+          sleep 1
+          # 嵌入的是真实构建产物：HTML 引用带 hash 的资源，且能取到该 JS
+          html="$(curl -fsSL http://127.0.0.1:8299/login)"
+          echo "$html" | grep -qo '/assets/index-[^"]*\.js' || { echo "UI 未嵌入真实产物"; exit 1; }
+          asset="$(echo "$html" | grep -o '/assets/index-[^"]*\.js' | head -1)"
+          curl -fsSL "http://127.0.0.1:8299$asset" > /dev/null
+          # pack 接口未带令牌必须 401（鉴权在、不是裸奔）
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8299/api/packs/latest)"
+          [ "$code" = "401" ] || { echo "pack API 期望 401 实得 $code"; exit 1; }
+          kill %1
+          cat /tmp/center.log
       - name: 创建 Release 并上传构件（幂等：已存在则复用）
         env:
           GH_TOKEN: ${{ github.token }}

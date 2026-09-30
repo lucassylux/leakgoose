@@ -7,10 +7,14 @@ import (
 	"embed"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/lucassylux/leakgoose/internal/baseline"
+	"github.com/lucassylux/leakgoose/internal/center"
 	"github.com/lucassylux/leakgoose/internal/report"
 	"github.com/lucassylux/leakgoose/internal/rules"
 	"github.com/lucassylux/leakgoose/internal/scan"
@@ -26,6 +30,8 @@ const usageText = `leakgoose — 敏感信息扫描器（凭据 + 中国个保�
 用法:
   leakgoose scan [选项] [路径]        扫描（默认路径 .，模式默认 history）
   leakgoose rules [选项]              列出已加载规则（含叠加效果）
+  leakgoose rules sync <URL> [选项]   从规则中心拉取规则包（校验和核验后落为规则文件）
+  leakgoose center serve [选项]       启动规则中心服务端（Web 维护 + 规则包分发 API）
   leakgoose version                   版本
 
 scan 选项:
@@ -53,7 +59,16 @@ func main() {
 	case "scan":
 		os.Exit(runScan(os.Args[2:]))
 	case "rules":
+		if len(os.Args) > 2 && os.Args[2] == "sync" {
+			os.Exit(runSync(os.Args[3:]))
+		}
 		os.Exit(runRules(os.Args[2:]))
+	case "center":
+		if len(os.Args) > 2 && os.Args[2] == "serve" {
+			os.Exit(runCenterServe(os.Args[3:]))
+		}
+		fmt.Fprint(os.Stderr, "用法: leakgoose center serve [--db FILE] [--listen ADDR] [--admin-password PW]\n")
+		os.Exit(2)
 	case "version":
 		fmt.Println("leakgoose", version)
 	case "help", "-h", "--help":
@@ -94,6 +109,12 @@ func runScan(args []string) int {
 	fs.BoolVar(&opts.redact, "redact", true, "命中内容脱敏展示（--redact=false 关闭）")
 	fs.IntVar(&opts.maxFileMB, "max-file-mb", 5, "单文件扫描上限 MB")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	// Go flag 在首个位置参数处停止解析：路径之后若还跟着 flag 样式参数会被静默吞掉，
+	// 这里显式报错提示正确顺序（flag 全部放在路径之前）
+	if fs.NArg() > 1 {
+		fmt.Fprintf(os.Stderr, "leakgoose: 未识别的参数 %v（flag 需放在扫描路径之前：leakgoose scan [flags] [路径]）\n", fs.Args()[1:])
 		return 2
 	}
 	opts.ruleFiles = ruleFiles
@@ -228,6 +249,20 @@ func loadBuiltin(noBuiltin bool) ([]byte, error) {
 	return builtinRules.ReadFile("rules/builtin.yaml")
 }
 
+// reorderFlags Go flag 的经典坑兜底：位置参数出现在 flag 之前时 Parse 会提前停止、
+// 把后续 flag 全吞成位置参数。Parse 失败（多余位置参数）时把首个非 - 开头参数移到末尾重试，
+// 兼容 "sync URL --token T" / "scan . --mode dir" 这类自然写法。
+func reorderArgs(args []string) []string {
+	for i, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			out := append([]string{}, args[:i]...)
+			out = append(out, args[i+1:]...)
+			return append(out, a)
+		}
+	}
+	return args
+}
+
 // multiFlag 支持重复的字符串参数（-r a.yaml -r b.yaml）
 type multiFlag []string
 
@@ -235,4 +270,95 @@ func (m *multiFlag) String() string { return strconv.Itoa(len(*m)) + " 个文件
 func (m *multiFlag) Set(v string) error {
 	*m = append(*m, v)
 	return nil
+}
+
+//go:embed all:web/dist
+var centerUI embed.FS
+
+// runCenterServe 规则中心服务端：默认 :8280 + center.db；首次启动种子 admin
+// （口令取 --admin-password 或环境变量 LEAKGOOSE_CENTER_ADMIN_PASSWORD，缺省自动生成一次性打印）
+func runCenterServe(args []string) int {
+	fs := flag.NewFlagSet("center serve", flag.ContinueOnError)
+	dbPath := fs.String("db", "center.db", "SQLite 库文件")
+	listen := fs.String("listen", ":8280", "监听地址")
+	uiDir := fs.String("ui-dir", "", "前端静态目录（默认用内嵌 dist；本地开发指到 web/dist）")
+	adminPw := fs.String("admin-password", os.Getenv("LEAKGOOSE_CENTER_ADMIN_PASSWORD"), "管理员初始口令（仅首次建库生效）")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	store, generated, err := center.Open(*dbPath, *adminPw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leakgoose: 打开库失败: %v\n", err)
+		return 2
+	}
+	defer store.Close()
+	if generated != "" {
+		fmt.Printf("=== 首次启动：管理员账号 admin，初始口令（仅此一次显示，请立即登录）: %s ===\n", generated)
+	}
+	var uifs = center.SubFS(centerUI, "web/dist")
+	if *uiDir != "" {
+		uifs = center.DirFS(*uiDir)
+	}
+	srv := center.NewServer(store, uifs)
+	fmt.Printf("leakgoose center %s 监听 %s（库: %s）\n", version, *listen, *dbPath)
+	if err := http.ListenAndServe(*listen, srv.Handler()); err != nil {
+		fmt.Fprintf(os.Stderr, "leakgoose: 服务退出: %v\n", err)
+		return 2
+	}
+	return 0
+}
+
+// runSync 从规则中心拉取规则包：sha256 核验后写成规则文件（scan -r 直接可用）
+func runSync(args []string) int {
+	fs := flag.NewFlagSet("rules sync", flag.ContinueOnError)
+	token := fs.String("token", os.Getenv("LEAKGOOSE_CENTER_TOKEN"), "读令牌（或环境变量 LEAKGOOSE_CENTER_TOKEN）")
+	out := fs.String("o", ".leakgoose/center-pack.yaml", "落盘路径")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		// 位置参数在前导致 flag 未被解析：重排（首个非 - 参数移末尾）后再试一次
+		_ = fs.Parse(reorderArgs(args))
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "用法: leakgoose rules sync <包地址，如 https://center.internal/api/packs/latest> [--token T] [-o FILE]")
+		return 2
+	}
+	url := fs.Arg(0)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leakgoose: %v\n", err)
+		return 2
+	}
+	req.Header.Set("Authorization", "Bearer "+*token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leakgoose: 拉取失败: %v\n", err)
+		return 2
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leakgoose: 读取响应失败: %v\n", err)
+		return 2
+	}
+	if resp.StatusCode != 200 {
+		fmt.Fprintf(os.Stderr, "leakgoose: 拉取失败 http=%d: %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+		return 2
+	}
+	pack, err := center.ParsePackJSON(body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leakgoose: 响应不是合法规则包: %v\n", err)
+		return 2
+	}
+	if !pack.Verify() {
+		fmt.Fprintf(os.Stderr, "leakgoose: 校验和不匹配（包声明 %s）——传输被篡改或两端版本不一致，拒绝落盘\n", pack.Sha256)
+		return 2
+	}
+	if err := center.WritePackFile(pack, *out); err != nil {
+		fmt.Fprintf(os.Stderr, "leakgoose: 写文件失败: %v\n", err)
+		return 2
+	}
+	fmt.Printf("已同步规则包 %s（%d 条规则，sha256 %s）→ %s\n", pack.Version, len(pack.Rules), pack.Sha256[:12], *out)
+	return 0
 }

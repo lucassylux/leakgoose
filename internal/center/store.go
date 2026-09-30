@@ -1,0 +1,554 @@
+// Package center 实现规则中心服务端：规则草稿 CRUD、测试用例、版本化发布、
+// 规则包分发 API、审计。存储默认 SQLite（单文件、零运维），规则数据量小（几十条），
+// 单连接串行写足够且天然规避 SQLITE_BUSY。
+package center
+
+import (
+	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	_ "modernc.org/sqlite" // 纯 Go 驱动：保住 CGO_ENABLED=0 的六平台交叉编译
+
+	"github.com/lucassylux/leakgoose/internal/rules"
+)
+
+// Rule 草稿态规则（存储形态；keywords/paths 以 CSV 存列，读取时拆分）
+type Rule struct {
+	RID          string   `json:"id"`
+	Name         string   `json:"name"`
+	Severity     string   `json:"severity"`
+	Pattern      string   `json:"pattern"`
+	Validate     string   `json:"validate,omitempty"`
+	Keywords     []string `json:"keywords,omitempty"`
+	IncludePaths []string `json:"include-paths,omitempty"`
+	ExcludePaths []string `json:"exclude-paths,omitempty"`
+	Enabled      bool     `json:"enabled"`
+	Description  string   `json:"description,omitempty"`
+	UpdatedBy    string   `json:"updatedBy,omitempty"`
+	UpdatedAt    string   `json:"updatedAt,omitempty"`
+}
+
+// TestCase 规则用例：样例输入 + 期望命中（发布前全量回归）
+type TestCase struct {
+	ID          int64  `json:"id,omitempty"`
+	RuleRID     string `json:"ruleId"`
+	Input       string `json:"input"`
+	ExpectMatch bool   `json:"expectMatch"`
+}
+
+// PackRow 已发布包记录
+type PackRow struct {
+	Version     string `json:"version"`
+	Sha256      string `json:"sha256"`
+	Changelog   string `json:"changelog"`
+	PublishedBy string `json:"publishedBy"`
+	PublishedAt string `json:"publishedAt"`
+	RulesYAML   string `json:"-"` // 分发时使用，列表不回传
+}
+
+// Token API 读令牌（哈希落库，明文仅创建时一次性返回）
+type Token struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	TokenHash string `json:"-"`
+	CreatedAt string `json:"createdAt"`
+	LastUsed  string `json:"lastUsed,omitempty"`
+}
+
+// AuditEntry 审计记录
+type AuditEntry struct {
+	ID     int64  `json:"id"`
+	At     string `json:"at"`
+	Actor  string `json:"actor"`
+	Action string `json:"action"`
+	Entity string `json:"entity"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// User 登录用户
+type User struct {
+	Username     string `json:"username"`
+	PasswordHash string `json:"-"`
+	Role         string `json:"role"` // admin / editor / viewer
+}
+
+var ErrNotFound = errors.New("not found")
+
+// Store SQLite 存储
+type Store struct {
+	db *sql.DB
+}
+
+// Open 打开（或初始化）库文件；首次启动种子管理员，返回管理员初始口令（调用方打印一次性告知）
+func Open(path, seedAdminPassword string) (*Store, string, error) {
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	if err != nil {
+		return nil, "", err
+	}
+	db.SetMaxOpenConns(1) // 单写者串行：规则中心流量小，彻底规避 SQLITE_BUSY
+	s := &Store{db: db}
+	if err := s.migrate(); err != nil {
+		return nil, "", err
+	}
+	if seedAdminPassword != "" {
+		if err := s.SeedAdmin(seedAdminPassword); err != nil {
+			return nil, "", err
+		}
+		return s, "", nil
+	}
+	// 未显式给初始口令：仅当尚无用户时生成随机口令（一次性返回；忘了就删 users 行重来）
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
+		return nil, "", err
+	}
+	if n == 0 {
+		pw, err := randomToken(16)
+		if err != nil {
+			return nil, "", err
+		}
+		if err := s.SeedAdmin(pw); err != nil {
+			return nil, "", err
+		}
+		return s, pw, nil
+	}
+	return s, "", nil
+}
+
+// Close 关闭库
+func (s *Store) Close() error { return s.db.Close() }
+
+func (s *Store) migrate() error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS users(
+			username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS rules(
+			rid TEXT PRIMARY KEY, name TEXT NOT NULL, severity TEXT NOT NULL, pattern TEXT NOT NULL,
+			validate TEXT NOT NULL DEFAULT '', keywords TEXT NOT NULL DEFAULT '',
+			include_paths TEXT NOT NULL DEFAULT '', exclude_paths TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1, description TEXT NOT NULL DEFAULT '',
+			updated_by TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS test_cases(
+			id INTEGER PRIMARY KEY AUTOINCREMENT, rule_rid TEXT NOT NULL,
+			input TEXT NOT NULL, expect_match INTEGER NOT NULL, sort INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE IF NOT EXISTS packs(
+			version TEXT PRIMARY KEY, sha256 TEXT NOT NULL, changelog TEXT NOT NULL DEFAULT '',
+			published_by TEXT NOT NULL, published_at TEXT NOT NULL, rules_yaml TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS api_tokens(
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, token_hash TEXT UNIQUE NOT NULL,
+			created_at TEXT NOT NULL, last_used_at TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS audit(
+			id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, actor TEXT NOT NULL,
+			action TEXT NOT NULL, entity TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '')`,
+	}
+	for _, q := range stmts {
+		if _, err := s.db.Exec(q); err != nil {
+			return fmt.Errorf("初始化表结构: %w", err)
+		}
+	}
+	return nil
+}
+
+// ---------- 用户 ----------
+
+// SeedAdmin 首次种子管理员（已存在则跳过；bcrypt 存哈希）
+func (s *Store) SeedAdmin(password string) error {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	hash, err := bcryptHash(password)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO users(username, password_hash, role, created_at) VALUES('admin', ?, 'admin', ?)`,
+		hash, now())
+	return err
+}
+
+// CreateUser 建用户（admin 用）
+func (s *Store) CreateUser(username, password, role string) error {
+	hash, err := bcryptHash(password)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO users(username, password_hash, role, created_at) VALUES(?,?,?,?)`,
+		username, hash, role, now())
+	return err
+}
+
+// GetUser 按用户名取
+func (s *Store) GetUser(username string) (*User, error) {
+	u := &User{}
+	err := s.db.QueryRow(`SELECT username, password_hash, role FROM users WHERE username=?`, username).
+		Scan(&u.Username, &u.PasswordHash, &u.Role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return u, err
+}
+
+// ---------- 规则 ----------
+
+func (s *Store) ListRules(q string, enabled *bool) ([]*Rule, error) {
+	sb := strings.Builder{}
+	args := []any{}
+	sb.WriteString(`SELECT rid,name,severity,pattern,validate,keywords,include_paths,exclude_paths,enabled,description,updated_by,updated_at FROM rules WHERE 1=1`)
+	if q != "" {
+		sb.WriteString(` AND (rid LIKE ? OR name LIKE ?)`)
+		like := "%" + q + "%"
+		args = append(args, like, like)
+	}
+	if enabled != nil {
+		sb.WriteString(` AND enabled=?`)
+		args = append(args, *enabled)
+	}
+	sb.WriteString(` ORDER BY rid`)
+	rows, err := s.db.Query(sb.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Rule
+	for rows.Next() {
+		r := &Rule{}
+		var kw, inc, exc string
+		var en int
+		if err := rows.Scan(&r.RID, &r.Name, &r.Severity, &r.Pattern, &r.Validate, &kw, &inc, &exc, &en, &r.Description, &r.UpdatedBy, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		r.Enabled = en == 1
+		r.Keywords = splitCSV(kw)
+		r.IncludePaths = splitCSV(inc)
+		r.ExcludePaths = splitCSV(exc)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetRule(rid string) (*Rule, error) {
+	list, err := s.ListRules("", nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range list {
+		if r.RID == rid {
+			return r, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *Store) UpsertRule(r *Rule, actor string) error {
+	if _, err := s.db.Exec(
+		`INSERT INTO rules(rid,name,severity,pattern,validate,keywords,include_paths,exclude_paths,enabled,description,updated_by,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+		 ON CONFLICT(rid) DO UPDATE SET name=excluded.name,severity=excluded.severity,pattern=excluded.pattern,
+		   validate=excluded.validate,keywords=excluded.keywords,include_paths=excluded.include_paths,
+		   exclude_paths=excluded.exclude_paths,enabled=excluded.enabled,description=excluded.description,
+		   updated_by=excluded.updated_by,updated_at=excluded.updated_at`,
+		r.RID, r.Name, r.Severity, r.Pattern, r.Validate, joinCSV(r.Keywords),
+		joinCSV(r.IncludePaths), joinCSV(r.ExcludePaths), b2i(r.Enabled), r.Description,
+		actor, now()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) DeleteRule(rid string) error {
+	res, err := s.db.Exec(`DELETE FROM rules WHERE rid=?`, rid)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	_, _ = s.db.Exec(`DELETE FROM test_cases WHERE rule_rid=?`, rid)
+	return nil
+}
+
+// ---------- 用例 ----------
+
+func (s *Store) ListCases(rid string) ([]TestCase, error) {
+	rows, err := s.db.Query(`SELECT id,rule_rid,input,expect_match FROM test_cases WHERE rule_rid=? ORDER BY sort,id`, rid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TestCase
+	for rows.Next() {
+		c := TestCase{}
+		var em int
+		if err := rows.Scan(&c.ID, &c.RuleRID, &c.Input, &em); err != nil {
+			return nil, err
+		}
+		c.ExpectMatch = em == 1
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ReplaceCases 整组替换某规则的用例
+func (s *Store) ReplaceCases(rid string, cases []TestCase) error {
+	if _, err := s.db.Exec(`DELETE FROM test_cases WHERE rule_rid=?`, rid); err != nil {
+		return err
+	}
+	for i, c := range cases {
+		if _, err := s.db.Exec(`INSERT INTO test_cases(rule_rid,input,expect_match,sort) VALUES(?,?,?,?)`,
+			rid, c.Input, b2i(c.ExpectMatch), i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ---------- 发布 ----------
+
+// Publish 发布当前启用规则为不可变版本：先跑全部用例回归（失败即拒绝），
+// 再生成版本号/快照/校验和落库。返回新版本。
+func (s *Store) Publish(changelog, actor string) (*rules.Pack, error) {
+	enabled := true
+	rl, err := s.ListRules("", &enabled)
+	if err != nil {
+		return nil, err
+	}
+	if len(rl) == 0 {
+		return nil, errors.New("没有启用中的规则，拒绝发布空包")
+	}
+	// 用例回归：任何一条期望不符即拒绝发布（规则质量的门禁）
+	var failures []string
+	for _, r := range rl {
+		cases, err := s.ListCases(r.RID)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range cases {
+			hits, err := rules.TryMatch(r.Pattern, r.Validate, c.Input)
+			if err != nil {
+				failures = append(failures, fmt.Sprintf("%s: 规则自身配置错误: %v", r.RID, err))
+				continue
+			}
+			if (len(hits) > 0) != c.ExpectMatch {
+				failures = append(failures, fmt.Sprintf("%s: 用例「%s」期望%v，实际%v",
+					r.RID, short(c.Input), c.ExpectMatch, len(hits) > 0))
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return nil, &PublishRejected{Failures: failures}
+	}
+
+	nowT := time.Now()
+	version := rules.NewPackVersion(nowT, s.countPacksOn(nowT))
+	pack := &rules.Pack{Version: version, GeneratedAt: now()}
+	for _, r := range rl {
+		pack.Rules = append(pack.Rules, &rules.Rule{
+			ID: r.RID, Name: r.Name, Severity: r.Severity, Pattern: r.Pattern,
+			Validate: r.Validate, Keywords: r.Keywords,
+			IncludePaths: r.IncludePaths, ExcludePaths: r.ExcludePaths,
+		})
+	}
+	pack.Sha256 = pack.ComputeChecksum()
+	yamlData, err := yamlMarshal(struct {
+		Version string        `yaml:"version"`
+		Sha256  string        `yaml:"sha256"`
+		Rules   []*rules.Rule `yaml:"rules"`
+	}{pack.Version, pack.Sha256, pack.Rules})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO packs(version,sha256,changelog,published_by,published_at,rules_yaml) VALUES(?,?,?,?,?,?)`,
+		pack.Version, pack.Sha256, changelog, actor, now(), string(yamlData)); err != nil {
+		return nil, err
+	}
+	_ = s.Audit(actor, "publish", "pack/"+version, changelog)
+	return pack, nil
+}
+
+// PublishRejected 用例回归失败（携带逐条原因）
+type PublishRejected struct{ Failures []string }
+
+func (e *PublishRejected) Error() string {
+	return "用例回归未通过，已拒绝发布:\n" + strings.Join(e.Failures, "\n")
+}
+
+func (s *Store) countPacksOn(t time.Time) int {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM packs WHERE version LIKE ?`, t.Format("2006.01.02")+"-%").Scan(&n)
+	return n
+}
+
+// LatestPack 最新已发布包（按时间倒序第一行）
+func (s *Store) LatestPack() (*PackRow, error) {
+	row := s.db.QueryRow(`SELECT version,sha256,changelog,published_by,published_at,rules_yaml FROM packs ORDER BY published_at DESC, version DESC LIMIT 1`)
+	return scanPack(row)
+}
+
+// GetPack 指定版本
+func (s *Store) GetPack(version string) (*PackRow, error) {
+	row := s.db.QueryRow(`SELECT version,sha256,changelog,published_by,published_at,rules_yaml FROM packs WHERE version=?`, version)
+	return scanPack(row)
+}
+
+func scanPack(row *sql.Row) (*PackRow, error) {
+	p := &PackRow{}
+	err := row.Scan(&p.Version, &p.Sha256, &p.Changelog, &p.PublishedBy, &p.PublishedAt, &p.RulesYAML)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return p, err
+}
+
+// ListPacks 版本列表（新→旧）
+func (s *Store) ListPacks() ([]PackRow, error) {
+	rows, err := s.db.Query(`SELECT version,sha256,changelog,published_by,published_at,'' FROM packs ORDER BY published_at DESC, version DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PackRow
+	for rows.Next() {
+		p := PackRow{}
+		if err := rows.Scan(&p.Version, &p.Sha256, &p.Changelog, &p.PublishedBy, &p.PublishedAt, &p.RulesYAML); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ---------- API 令牌 ----------
+
+// CreateToken 生成读令牌：明文一次性返回，库中只存 sha256
+func (s *Store) CreateToken(name, actor string) (string, error) {
+	plain, err := randomToken(24)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256([]byte(plain))
+	if _, err := s.db.Exec(`INSERT INTO api_tokens(name,token_hash,created_at) VALUES(?,?,?)`,
+		name, hex.EncodeToString(h[:]), now()); err != nil {
+		return "", err
+	}
+	_ = s.Audit(actor, "create-token", "token/"+name, "")
+	return plain, nil
+}
+
+// CheckToken 校验读令牌（命中更新 last_used）
+func (s *Store) CheckToken(plain string) bool {
+	h := sha256.Sum256([]byte(plain))
+	var id int64
+	err := s.db.QueryRow(`SELECT id FROM api_tokens WHERE token_hash=?`, hex.EncodeToString(h[:])).Scan(&id)
+	if err != nil {
+		return false
+	}
+	_, _ = s.db.Exec(`UPDATE api_tokens SET last_used_at=? WHERE id=?`, now(), id)
+	return true
+}
+
+// ListTokens / DeleteToken 令牌管理
+func (s *Store) ListTokens() ([]Token, error) {
+	rows, err := s.db.Query(`SELECT id,name,created_at,last_used_at FROM api_tokens ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Token
+	for rows.Next() {
+		t := Token{}
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.LastUsed); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteToken(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM api_tokens WHERE id=?`, id)
+	return err
+}
+
+// ---------- 审计 ----------
+
+// Audit 追加审计（写操作统一收口）
+func (s *Store) Audit(actor, action, entity, detail string) error {
+	_, err := s.db.Exec(`INSERT INTO audit(at,actor,action,entity,detail) VALUES(?,?,?,?,?)`,
+		now(), actor, action, entity, detail)
+	return err
+}
+
+// ListAudit 审计列表（新→旧）
+func (s *Store) ListAudit(limit int) ([]AuditEntry, error) {
+	rows, err := s.db.Query(`SELECT id,at,actor,action,entity,detail FROM audit ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditEntry
+	for rows.Next() {
+		a := AuditEntry{}
+		if err := rows.Scan(&a.ID, &a.At, &a.Actor, &a.Action, &a.Entity, &a.Detail); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ---------- 助手 ----------
+
+func now() string { return time.Now().Format(time.RFC3339) }
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func joinCSV(ss []string) string { return strings.Join(ss, ",") }
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func short(s string) string {
+	r := []rune(s)
+	if len(r) > 24 {
+		return string(r[:24]) + "…"
+	}
+	return s
+}
+
+const tokenAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+
+func randomToken(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	out := make([]byte, n)
+	for i, b := range buf {
+		out[i] = tokenAlphabet[int(b)%len(tokenAlphabet)]
+	}
+	return string(out), nil
+}
