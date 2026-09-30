@@ -19,3 +19,4 @@ center-e2e.db*
 .token.txt
 center-dev.db*
 .center-dev.log
+.center-prod.log

@@ -214,6 +214,11 @@ func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request, _ *User
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 空表时 Go 侧为 nil，JSON 会变 null——前端 SkTable 直接 .data.filter 会崩，
+	// 与 audit/tokens/packs 同口径归一化为 []
+	if list == nil {
+		list = []*Rule{}
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 

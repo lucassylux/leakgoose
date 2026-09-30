@@ -147,7 +147,7 @@ const load = async () => {
     const q = new URLSearchParams()
     if (query.q) q.set('q', query.q)
     if (query.enabled !== null && query.enabled !== undefined) q.set('enabled', String(query.enabled === 1))
-    rows.value = await api.get<Rule[]>('/api/rules?' + q.toString())
+    rows.value = (await api.get<Rule[]>('/api/rules?' + q.toString())) ?? []
   } catch (e) {
     skMessage.error((e as Error).message)
   } finally {
