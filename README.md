@@ -126,8 +126,10 @@ leakgoose rules sync https://center.internal:8280/api/packs/2026.09.30-1.yaml --
 
 规则中心可作为 OIDC 客户端接入统一身份认证中心（如 [WatchGoose](https://github.com/lucassylux/watchgoose)），授权码 + PKCE 流程：
 
+配置有两条路：**「系统设置」页维护**（admin 登录后所见，改完即时生效，推荐），或环境变量首启注入（写入 settings 表，仅首次）：
+
 ```bash
-# 环境变量首启注入（写入 settings 表；之后改配置直接改库或删库重建）
+# 环境变量首启注入（适合 systemd/容器；之后可在设置页改）
 OIDC_ISSUER=http://localhost:8080 \        # WatchGoose 的 issuer
 OIDC_CLIENT_ID=leakgoose-center \           # 管理台「应用接入」注册（PKCE 公开客户端可无 secret）
 OIDC_ALLOWED_USERS=admin,terence \          # 白名单：空 = SSO 整套休眠，仅本地账号登录
