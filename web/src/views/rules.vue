@@ -25,7 +25,7 @@
           <span class="mono cell-clip" :title="record.validate || ''">{{ record.validate || '—' }}</span>
         </template>
         <template v-else-if="column.key === 'pattern'">
-          <span class="mono cell-clip" :title="record.pattern">{{ record.pattern }}</span>
+          <span class="mono cell-regex" :title="record.pattern">{{ record.pattern }}</span>
         </template>
         <template v-else-if="column.key === 'updatedAt'">
           {{ fmtTime(record.updatedAt) }}
@@ -130,17 +130,17 @@ const expectOptions = [
   { label: '不应命中', value: false },
 ]
 
-// 长单 token 列（ID/验真/更新时间）一律不换行：列级 ellipsis + 悬停看全量；
-// 窄屏靠 scrollX 横滚，不挤压换行
+// 长单 token 列（ID/验真/更新时间）不换行省略号；正则列放开采纳任意断行换行；
+// 标签/时间/操作类居中，文本类左对齐；窄屏靠 scrollX 横滚
 const columns = [
   { title: 'ID', key: 'id', width: 190, ellipsis: true },
   { title: '名称', key: 'name', width: 170, ellipsis: true },
-  { title: '严重级', key: 'severity', width: 90 },
-  { title: '正则', key: 'pattern', ellipsis: true },
+  { title: '严重级', key: 'severity', width: 90, align: 'center' },
+  { title: '正则', key: 'pattern' },
   { title: '验真', key: 'validate', width: 175, ellipsis: true },
-  { title: '状态', key: 'enabled', width: 80 },
-  { title: '更新', key: 'updatedAt', width: 150, ellipsis: true },
-  { title: '操作', key: 'ops', width: 150, fixed: 'right' },
+  { title: '状态', key: 'enabled', width: 80, align: 'center' },
+  { title: '更新', key: 'updatedAt', width: 150, ellipsis: true, align: 'center' },
+  { title: '操作', key: 'ops', width: 150, fixed: 'right', align: 'center' },
 ]
 
 const load = async () => {
@@ -243,3 +243,14 @@ const onSandboxInput = () => {
 }
 // sandbox 输入触发（v-model 已绑定值，此处只做防抖）
 </script>
+
+<style scoped>
+/* 正则列：放开采纳换行——长 token 任意断行（break-all），多行完整展示 */
+.cell-regex {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.6;
+  font-size: 12px;
+}
+</style>
