@@ -3,7 +3,7 @@
        这里用原生 textarea 补齐，视觉对齐 .sk-input-el -->
   <textarea
     class="lg-textarea mono"
-    :value="modelValue"
+    :value="modelValue ?? ''"
     :rows="rows"
     :placeholder="placeholder"
     :disabled="disabled"
@@ -13,7 +13,7 @@
 
 <script setup lang="ts">
 defineProps<{
-  modelValue: string
+  modelValue?: string
   rows?: number
   placeholder?: string
   disabled?: boolean
