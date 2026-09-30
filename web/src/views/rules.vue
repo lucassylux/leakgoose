@@ -293,8 +293,8 @@ const onSandboxInput = () => {
 .sandbox-col, .cases-col { flex: 1; min-width: 0; }
 @media (max-width: 720px) { .sandbox-row { flex-direction: column; } }
 
-/* 弹窗表单双列（看门鹅同款实现）：成对字段各占一半，正则/说明整行；窄屏自动单列 */
-.row-flex { display: flex; flex-wrap: wrap; gap: 0 16px; }
+/* 弹窗表单双列（看门鹅同款实现）：成对字段各占一半，正则/说明整行；竖向 12px 行距防贴顶；窄屏自动单列 */
+.row-flex { display: flex; flex-wrap: wrap; gap: 12px 16px; }
 .row-flex > * { flex: 1 1 42%; min-width: 0; }
 .row-flex > .span-2 { flex: 1 1 100%; }
 @media (max-width: 720px) { .row-flex > * { flex: 1 1 100%; } }
