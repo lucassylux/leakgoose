@@ -121,7 +121,7 @@ func TestRuleCRUDAndSandbox(t *testing.T) {
 	}
 
 	// 沙箱：真实样例命中、校验位拦截误报样例
-	code, m, _ = app.do("GET", "/api/rules/test", map[string]any{
+	code, m, _ = app.do("POST", "/api/rules/test", map[string]any{
 		"pattern": `(?<!\d)1[3-9]\d{9}(?!\d)`, "validate": "builtin:cn-mobile-segment",
 		"sample": "联系 13800138000 或 10000000000",
 	})
