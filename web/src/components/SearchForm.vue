@@ -1,16 +1,12 @@
 <template>
-  <div class="search-form">
+  <SkSearchForm v-bind="$attrs">
     <slot />
-  </div>
+  </SkSearchForm>
 </template>
 
-<style scoped>
-/* 与 watchgoose 管理台 SearchForm 同款网格：自适应换行、控件撑满列 */
-.search-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px 24px;
-  margin-bottom: 14px;
-}
-.search-form :deep(.sk-form-field) { margin: 0; }
-</style>
+<script setup lang="ts">
+// 薄壳：与看门鹅管理台同款——搜索区容器用 sketch-ui 的 SkSearchForm
+//（响应式网格 + 无 label 按钮组沉底与控件底边对齐 + 窄屏两列紧凑）。
+// 保留本文件只为页面 import 路径稳定；布局数值个性化可传 minCol/gap/rowGap。
+import SkSearchForm from '@xzsoft/sketch-ui/components/SkSearchForm.vue'
+</script>
