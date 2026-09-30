@@ -65,9 +65,9 @@
             <SkFormField name="paths" label="路径排除">
               <SkInput v-model="excludePathsText" placeholder="逗号分隔，如 **/test/**, docs/**" />
             </SkFormField>
-            <SkFormField name="enabled" label="状态">
-              <SkSelect v-model="form.enabled" :options="enabledOptions" />
-            </SkFormField>
+              <SkFormField name="enabled" label="状态">
+                <SkSelect v-model="form.enabled" :options="enabledBoolOptions" />
+              </SkFormField>
             <div class="span-2">
               <SkFormField name="desc" label="说明">
                 <SkInput v-model="form.description" :maxlength="200" placeholder="规则背景/负责人/豁免口径" />
@@ -148,9 +148,15 @@ const validateOptions = [
   { label: '银行卡 Luhn', value: 'builtin:luhn' },
   { label: '手机号号段', value: 'builtin:cn-mobile-segment' },
 ]
+// 搜索区用数字（query.enabled: number|null）；编辑器表单值是 boolean，
+// 选项值须同型才能回显标签（否则显示原始 true/false）
 const enabledOptions = [
   { label: '启用', value: 1 },
   { label: '停用', value: 0 },
+]
+const enabledBoolOptions = [
+  { label: '启用', value: true },
+  { label: '停用', value: false },
 ]
 const expectOptions = [
   { label: '应命中', value: true },
