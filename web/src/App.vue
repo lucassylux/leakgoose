@@ -1,5 +1,7 @@
 <template>
-  <router-view v-if="$route.meta.plain" />
+  <!-- 初始导航未就绪时整帧留白：占位路由的 meta 为空，若直接按 v-else 渲染会闪出整套外壳 -->
+  <div v-if="!routerReady" class="boot"></div>
+  <router-view v-else-if="$route.meta.plain" />
   <div v-else class="app-shell">
     <!-- 移动端抽屉遮罩：点按关闭（桌面端 mobileOpen 恒 false 不渲染） -->
     <div v-if="mobileOpen" class="sider-mask" @click="mobileOpen = false"></div>
@@ -67,6 +69,10 @@ import { clearSession } from './router'
 
 const route = useRoute()
 const router = useRouter()
+
+// 首次导航解析完成前不渲染路由内容（否则占位路由 meta 为空，先闪一帧外壳侧边栏）
+const routerReady = ref(false)
+router.isReady().then(() => { routerReady.value = true })
 // 展示名只读本地非敏感标记（登录时写入）：外壳不发任何认证请求——
 // 否则未登录时 401 → 拦截器整页跳 /login → 外壳再挂载再 401，形成刷新死循环。
 // 外壳在登录页（plain 路由）期间就已挂载，onMounted 只跑一次读不到登录后
@@ -119,6 +125,8 @@ const onUserMenu = (key: string | number) => {
 </script>
 
 <style>
+/* 初始导航占位：铺主题底色，避免暗色主题下白屏一闪 */
+.boot { height: 100vh; background: var(--sk-bg-pattern, none), var(--sk-paper, #f5f6f8); }
 .app-shell { display: flex; height: 100vh; overflow: hidden; }
 .brand-click { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
 
