@@ -1,5 +1,6 @@
 <template>
   <div class="login-page">
+    <div class="top-actions"><SkThemeSwitch /></div>
     <div class="box">
       <div class="hero">
         <GooseLogo :size="56" />
@@ -91,6 +92,14 @@ const doLogin = async () => {
   padding: 40px 16px;
   background: var(--sk-bg-pattern, none), var(--sk-paper, #f5f6f8);
   background-size: var(--sk-bg-pattern-size, auto), auto;
+}
+
+/* 右上角主题切换（与看门鹅登录页同款） */
+.top-actions {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 10;
 }
 .box { width: 380px; position: relative; z-index: 1; }
 .hero { display: flex; justify-content: center; margin-bottom: 14px; }
