@@ -1,0 +1,13 @@
+diff --git a/node_modules/@xzsoft/sketch-ui/components/SkSelect.vue b/node_modules/@xzsoft/sketch-ui/components/SkSelect.vue
+--- a/node_modules/@xzsoft/sketch-ui/components/SkSelect.vue
++++ b/node_modules/@xzsoft/sketch-ui/components/SkSelect.vue
+@@ -34,7 +34,8 @@
+         </button>
+         <div v-if="!filteredOptions.length" class="sk-select-empty">无匹配项</div>
+       </div>
+-      <div class="sk-select-multi-ops">
++      <!-- [leakgoose patch] 单选模式下隐藏多选操作条：点选项即选中并关闭，清空/完成均为冗余 -->
++      <div v-if="multiple" class="sk-select-multi-ops">
+         <button type="button" class="sk-select-multi-op" :disabled="!hasSelection" @click="clearAll">清空</button>
+         <button type="button" class="sk-select-multi-op is-done" @click="open = false">完成</button>
+       </div>
