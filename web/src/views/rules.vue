@@ -16,7 +16,7 @@
     <SkTable :columns="columns" :data="rows" :loading="loading" row-key="id" size="md" :scroll-x="1100">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'severity'">
-          <SkTag :color="sevColor[record.severity]">{{ record.severity }}</SkTag>
+          <SkTag :color="sevColor[record.severity]">{{ sevLabel(record.severity) }}</SkTag>
         </template>
         <template v-else-if="column.key === 'enabled'">
           <SkTag :color="record.enabled ? 'success' : 'default'">{{ record.enabled ? '启用' : '停用' }}</SkTag>
@@ -40,34 +40,41 @@
     </SkTable>
 
     <!-- 规则编辑器：表单 + 实时测试沙箱 + 用例 -->
-    <SkModal v-model:open="editOpen" :title="form.id ? `编辑规则：${form.id}` : '新建规则'" width="760px">
+    <SkModal v-model:open="editOpen" :title="form.id ? `编辑规则：${form.id}` : '新建规则'" width="980px">
       <div class="editor-grid">
         <div class="form-col">
-          <SkForm ref="formRef" label-width="92px">
-            <SkFormField name="id" label="规则 ID" required :rules="fRules.id">
-              <SkInput v-model="form.id" :disabled="!!form._exists" placeholder="如 cn-passport" />
-            </SkFormField>
-            <SkFormField name="name" label="名称" required :rules="fRules.name">
-              <SkInput v-model="form.name" placeholder="如 中国护照号" />
-            </SkFormField>
-            <SkFormField name="severity" label="严重级" required>
-              <SkSelect v-model="form.severity" :options="sevOptions" />
-            </SkFormField>
-            <SkFormField name="pattern" label="正则" required :rules="fRules.pattern">
-              <SkInput v-model="form.pattern" type="textarea" :rows="3" class="mono" placeholder="regexp2 语法，支持前后瞻 (?<!…)" />
-            </SkFormField>
-            <SkFormField name="validate" label="验真函数">
-              <SkSelect v-model="form.validate" clearable placeholder="（无）" :options="validateOptions" />
-            </SkFormField>
-            <SkFormField name="paths" label="路径排除">
-              <SkInput v-model="excludePathsText" placeholder="逗号分隔，如 **/test/**, docs/**" />
-            </SkFormField>
-            <SkFormField name="enabled" label="状态">
-              <SkSelect v-model="form.enabled" :options="enabledOptions" />
-            </SkFormField>
-            <SkFormField name="desc" label="说明">
-              <SkInput v-model="form.description" :maxlength="200" placeholder="规则背景/负责人/豁免口径" />
-            </SkFormField>
+          <!-- 双列布局（看门鹅弹窗表单同款）：正则/说明整行，其余成对；窄屏自动单列 -->
+          <SkForm ref="formRef" label-width="92px" class="form-two-col">
+            <div class="row-flex">
+              <SkFormField name="id" label="规则 ID" required :rules="fRules.id">
+                <SkInput v-model="form.id" :disabled="!!form._exists" placeholder="如 cn-passport" />
+              </SkFormField>
+              <SkFormField name="name" label="名称" required :rules="fRules.name">
+                <SkInput v-model="form.name" placeholder="如 中国护照号" />
+              </SkFormField>
+              <SkFormField name="severity" label="严重级" required>
+                <SkSelect v-model="form.severity" :options="sevOptions" />
+              </SkFormField>
+              <SkFormField name="validate" label="验真函数">
+                <SkSelect v-model="form.validate" clearable placeholder="（无）" :options="validateOptions" />
+              </SkFormField>
+              <div class="span-2">
+                <SkFormField name="pattern" label="正则" required :rules="fRules.pattern">
+                  <SkInput v-model="form.pattern" type="textarea" :rows="3" class="mono" placeholder="regexp2 语法，支持前后瞻 (?<!…)" />
+                </SkFormField>
+              </div>
+              <SkFormField name="paths" label="路径排除">
+                <SkInput v-model="excludePathsText" placeholder="逗号分隔，如 **/test/**, docs/**" />
+              </SkFormField>
+              <SkFormField name="enabled" label="状态">
+                <SkSelect v-model="form.enabled" :options="enabledOptions" />
+              </SkFormField>
+              <div class="span-2">
+                <SkFormField name="desc" label="说明">
+                  <SkInput v-model="form.description" :maxlength="200" placeholder="规则背景/负责人/豁免口径" />
+                </SkFormField>
+              </div>
+            </div>
           </SkForm>
         </div>
         <div class="sandbox-col">
@@ -115,7 +122,24 @@ const loading = ref(false)
 const query = reactive<{ q: string; enabled: number | null }>({ q: '', enabled: null })
 
 const sevColor: Record<string, string> = { critical: 'danger', high: 'warning', medium: 'info', low: 'default' }
-const sevOptions = ['critical', 'high', 'medium', 'low'].map(v => ({ label: v, value: v }))
+// 严重级走数据字典（rule-severity）：label 中文展示、value 编码落库；字典为空回退内置四级
+const FALLBACK_SEV: Record<string, string> = { critical: '严重', high: '高', medium: '中', low: '低' }
+const sevDict = ref<Record<string, string>>({})
+const sevLabel = (code: string) => sevDict.value[code] || FALLBACK_SEV[code] || code
+const sevOptions = computed(() => {
+  const pairs = Object.entries(sevDict.value)
+  return pairs.length
+    ? pairs.map(([value, label]) => ({ label, value }))
+    : Object.entries(FALLBACK_SEV).map(([value, label]) => ({ label, value }))
+})
+const loadSevDict = async () => {
+  try {
+    const items = await api.get<Array<{ label: string; value: string; enabled: boolean }>>('/api/dicts?type=rule-severity&enabled=true')
+    const m: Record<string, string> = {}
+    for (const it of items) m[it.value] = it.label
+    sevDict.value = m
+  } catch { /* 字典不可用时回退内置映射 */ }
+}
 const validateOptions = [
   { label: '身份证校验位', value: 'builtin:id-card-checksum' },
   { label: '银行卡 Luhn', value: 'builtin:luhn' },
@@ -156,7 +180,7 @@ const load = async () => {
     loading.value = false
   }
 }
-onMounted(load)
+onMounted(() => { loadSevDict(); load() })
 
 // ---------- 编辑器 ----------
 const editOpen = ref(false)
@@ -253,4 +277,26 @@ const onSandboxInput = () => {
   line-height: 1.6;
   font-size: 12px;
 }
+
+/* 编辑器总布局：左表单右沙箱；窄屏纵向堆叠 */
+.editor-grid { display: flex; gap: 18px; align-items: flex-start; }
+.form-col { flex: 1.25; min-width: 0; }
+.sandbox-col { flex: 1; min-width: 0; }
+@media (max-width: 900px) { .editor-grid { flex-direction: column; } }
+
+/* 弹窗表单双列（看门鹅同款实现）：成对字段各占一半，正则/说明整行；窄屏自动单列 */
+.row-flex { display: flex; flex-wrap: wrap; gap: 0 16px; }
+.row-flex > * { flex: 1 1 46%; min-width: 0; }
+.row-flex > .span-2 { flex: 1 1 100%; }
+@media (max-width: 720px) { .row-flex > * { flex: 1 1 100%; } }
+
+/* 沙箱与用例区 */
+.sb-title { font-size: 13px; font-weight: 600; color: var(--sk-text); }
+.sb-sub { font-weight: 400; font-size: 12px; color: var(--sk-text-faint); }
+.sb-error { margin-top: 8px; font-size: 12px; color: var(--sk-danger, #d03050); }
+.sb-hits { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.sb-empty { font-size: 12px; color: var(--sk-text-faint); }
+.case-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+.case-row .sk-input { flex: 1; }
+.case-expect { width: 118px; flex: none; }
 </style>

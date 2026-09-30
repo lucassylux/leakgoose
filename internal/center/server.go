@@ -73,6 +73,10 @@ func (s *Server) Handler() http.Handler {
 
 	// 审计与令牌（admin）
 	mux.HandleFunc("GET /api/audit", s.requireUI(s.handleAudit))
+	mux.HandleFunc("GET /api/dicts", s.requireUI(s.handleListDicts))
+	mux.HandleFunc("GET /api/dict-types", s.requireUI(s.handleListDictTypes))
+	mux.HandleFunc("POST /api/dicts", s.requireRole("editor", s.handleSaveDict))
+	mux.HandleFunc("DELETE /api/dicts/{id}", s.requireRole("editor", s.handleDeleteDict))
 	mux.HandleFunc("GET /api/tokens", s.requireRole("admin", s.handleListTokens))
 	mux.HandleFunc("POST /api/tokens", s.requireRole("admin", s.handleCreateToken))
 	mux.HandleFunc("DELETE /api/tokens/{id}", s.requireRole("admin", s.handleDeleteToken))
@@ -413,6 +417,65 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request, _ *User) {
 		list = []AuditEntry{}
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// ---------- 数据字典 ----------
+
+func (s *Server) handleListDictTypes(w http.ResponseWriter, _ *http.Request, _ *User) {
+	list, err := s.store.ListDictTypes()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if list == nil {
+		list = []DictType{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) handleListDicts(w http.ResponseWriter, r *http.Request, _ *User) {
+	t := r.URL.Query().Get("type")
+	if t == "" {
+		writeErr(w, http.StatusBadRequest, "type 必填")
+		return
+	}
+	// 编辑态要看到停用项，业务取值只要启用的（?enabled=true）
+	onlyEnabled := r.URL.Query().Get("enabled") == "true"
+	list, err := s.store.ListDicts(t, onlyEnabled)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if list == nil {
+		list = []DictItem{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) handleSaveDict(w http.ResponseWriter, r *http.Request, u *User) {
+	var d DictItem
+	if !readJSON(w, r, &d) {
+		return
+	}
+	if err := s.store.SaveDict(&d, u.Username); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) handleDeleteDict(w http.ResponseWriter, r *http.Request, u *User) {
+	var id int64
+	if _, err := fmt.Sscan(r.PathValue("id"), &id); err != nil {
+		writeErr(w, http.StatusBadRequest, "id 非法")
+		return
+	}
+	if err := s.store.DeleteDict(id); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	_ = s.store.Audit(u.Username, "delete", fmt.Sprintf("dict/%d", id), "")
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request, _ *User) {

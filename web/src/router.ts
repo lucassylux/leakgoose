@@ -10,6 +10,7 @@ import Publish from './views/publish.vue'
 import Audit from './views/audit.vue'
 import Access from './views/access.vue'
 import Settings from './views/settings.vue'
+import Dict from './views/dict.vue'
 
 // 登录标记仅作快速判定（非凭证；会话真实有效性由后端 cookie 裁决，401 拦截器收口）
 export function markSession() {
@@ -36,6 +37,7 @@ const router = createRouter({
         { path: 'audit', name: 'audit', component: Audit },
         { path: 'access', name: 'access', component: Access },
         { path: 'settings', name: 'settings', component: Settings },
+        { path: 'dict', name: 'dict', component: Dict },
         { path: '', redirect: '/rules' },
       ],
     },

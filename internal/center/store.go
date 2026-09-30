@@ -100,7 +100,10 @@ func Open(path, seedAdminPassword string) (*Store, string, error) {
 	if err := s.migrate(); err != nil {
 		return nil, "", err
 	}
-	s.seedOIDCEnv() // 环境变量注入 SSO 配置（settings 已有值不覆盖）
+	s.seedOIDCEnv()                       // 环境变量注入 SSO 配置（settings 已有值不覆盖）
+	if err := s.seedDicts(); err != nil { // 数据字典种子（严重级中文映射）
+		return nil, "", err
+	}
 	if seedAdminPassword != "" {
 		if err := s.SeedAdmin(seedAdminPassword); err != nil {
 			return nil, "", err
@@ -152,6 +155,10 @@ func (s *Store) migrate() error {
 			action TEXT NOT NULL, entity TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '')`,
 		`CREATE TABLE IF NOT EXISTS settings(
 			key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS dicts(
+			id INTEGER PRIMARY KEY AUTOINCREMENT, dict_type TEXT NOT NULL,
+			label TEXT NOT NULL, value TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0,
+			enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {
@@ -165,6 +172,145 @@ func (s *Store) migrate() error {
 	}
 	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_subject ON users(subject) WHERE subject != ''`); err != nil {
 		return fmt.Errorf("建 subject 索引: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_dicts_type_value ON dicts(dict_type, value)`); err != nil {
+		return fmt.Errorf("建字典唯一索引: %w", err)
+	}
+	return nil
+}
+
+// ---------- 数据字典 ----------
+
+// DictItem 字典项（type 分组：如 rule-severity；label 展示中文，value 为编码落库）
+type DictItem struct {
+	ID      int64  `json:"id,omitempty"`
+	Type    string `json:"type"`
+	Label   string `json:"label"`
+	Value   string `json:"value"`
+	Sort    int    `json:"sort"`
+	Enabled bool   `json:"enabled"`
+}
+
+// DictType 字典类型汇总（类型页：类型编码 + 展示名 + 项数）
+type DictType struct {
+	Type  string `json:"type"`
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// 系统内置字典类型的展示名（未知类型回退编码本身）
+var dictTypeNames = map[string]string{
+	"rule-severity": "规则严重级",
+}
+
+// seedDicts 首启种子：规则严重级中文映射（编码即内置规则口径）
+func (s *Store) seedDicts() error {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM dicts`).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	seed := []DictItem{
+		{Type: "rule-severity", Label: "严重", Value: "critical", Sort: 1, Enabled: true},
+		{Type: "rule-severity", Label: "高", Value: "high", Sort: 2, Enabled: true},
+		{Type: "rule-severity", Label: "中", Value: "medium", Sort: 3, Enabled: true},
+		{Type: "rule-severity", Label: "低", Value: "low", Sort: 4, Enabled: true},
+	}
+	for _, d := range seed {
+		if err := s.SaveDict(&d, "seed"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListDictTypes 类型汇总（有项才出现）
+func (s *Store) ListDictTypes() ([]DictType, error) {
+	rows, err := s.db.Query(`SELECT dict_type, COUNT(*) FROM dicts GROUP BY dict_type ORDER BY dict_type`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DictType
+	for rows.Next() {
+		t := DictType{}
+		if err := rows.Scan(&t.Type, &t.Count); err != nil {
+			return nil, err
+		}
+		t.Name = dictTypeNames[t.Type]
+		if t.Name == "" {
+			t.Name = t.Type
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ListDicts 某类型的字典项（仅启用的开关由调用方控制；排序 sort,id）
+func (s *Store) ListDicts(dictType string, onlyEnabled bool) ([]DictItem, error) {
+	sb := strings.Builder{}
+	sb.WriteString(`SELECT id,dict_type,label,value,sort,enabled FROM dicts WHERE dict_type=?`)
+	if onlyEnabled {
+		sb.WriteString(` AND enabled=1`)
+	}
+	sb.WriteString(` ORDER BY sort,id`)
+	rows, err := s.db.Query(sb.String(), dictType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DictItem
+	for rows.Next() {
+		d := DictItem{}
+		var en int
+		if err := rows.Scan(&d.ID, &d.Type, &d.Label, &d.Value, &d.Sort, &en); err != nil {
+			return nil, err
+		}
+		d.Enabled = en == 1
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// SaveDict 新增或更新（ID 为空新增；同类型下 value 唯一）
+func (s *Store) SaveDict(d *DictItem, actor string) error {
+	if d.Type == "" || d.Label == "" || d.Value == "" {
+		return errors.New("type/label/value 必填")
+	}
+	if d.ID == 0 {
+		res, err := s.db.Exec(
+			`INSERT INTO dicts(dict_type,label,value,sort,enabled,created_at) VALUES(?,?,?,?,?,?)`,
+			d.Type, d.Label, d.Value, d.Sort, b2i(d.Enabled), now())
+		if err != nil {
+			return fmt.Errorf("同类型下 value 需唯一: %w", err)
+		}
+		d.ID, _ = res.LastInsertId()
+	} else {
+		res, err := s.db.Exec(
+			`UPDATE dicts SET dict_type=?,label=?,value=?,sort=?,enabled=? WHERE id=?`,
+			d.Type, d.Label, d.Value, d.Sort, b2i(d.Enabled), d.ID)
+		if err != nil {
+			return fmt.Errorf("同类型下 value 需唯一: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+	}
+	action := "update"
+	if d.ID == 0 {
+		action = "create"
+	}
+	_ = s.Audit(actor, action, "dict/"+d.Type+"/"+d.Value, d.Label)
+	return nil
+}
+
+// DeleteDict 删除字典项
+func (s *Store) DeleteDict(id int64) error {
+	res, err := s.db.Exec(`DELETE FROM dicts WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

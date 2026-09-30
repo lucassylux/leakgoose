@@ -1,6 +1,7 @@
 package center
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -226,5 +227,55 @@ func TestSeedRules(t *testing.T) {
 	cases, err := store.ListCases("cn-mobile")
 	if err != nil || len(cases) != 2 {
 		t.Fatalf("cn-mobile 演示用例: %d %v", len(cases), err)
+	}
+}
+
+func TestDictCRUDAndSeed(t *testing.T) {
+	app := newTestApp(t)
+	// 首启种子：rule-severity 四级中文
+	code, _, _ := app.do("GET", "/api/dict-types", nil)
+	if code != 200 {
+		t.Fatalf("字典类型接口: %d", code)
+	}
+	getArr := func(path string, v any) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, app.srv.URL+path, nil)
+		resp, err := app.session.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("GET %s: %d", path, resp.StatusCode)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+			t.Fatalf("GET %s 解码: %v", path, err)
+		}
+	}
+	var types []DictType
+	getArr("/api/dict-types", &types)
+	if len(types) != 1 || types[0].Name != "规则严重级" {
+		t.Fatalf("字典类型: %+v", types)
+	}
+	var items []DictItem
+	getArr("/api/dicts?type=rule-severity", &items)
+	if len(items) != 4 || items[0].Label != "严重" || items[0].Value != "critical" {
+		t.Fatalf("严重级种子: %+v", items)
+	}
+	// 新增 + 同类型 value 唯一
+	code, m, _ := app.do("POST", "/api/dicts", map[string]any{"type": "rule-severity", "label": "紧急", "value": "critical", "sort": 0, "enabled": true})
+	if code == 200 {
+		t.Fatalf("重复 value 不应成功: %v", m)
+	}
+	// 正常新增新类型
+	code, m, _ = app.do("POST", "/api/dicts", map[string]any{"type": "demo", "label": "显示", "value": "show", "sort": 1, "enabled": true})
+	if code != 200 {
+		t.Fatalf("新增字典: %d %v", code, m)
+	}
+	// enabled 过滤
+	var demo []DictItem
+	getArr("/api/dicts?type=demo&enabled=true", &demo)
+	if len(demo) != 1 || !demo[0].Enabled {
+		t.Fatalf("enabled 过滤: %+v", demo)
 	}
 }
