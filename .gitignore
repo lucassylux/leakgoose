@@ -17,3 +17,5 @@ center-e2e.db*
 .r.json
 .c.json
 .token.txt
+center-dev.db*
+.center-dev.log

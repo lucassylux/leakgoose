@@ -76,7 +76,11 @@ type User struct {
 	Username     string `json:"username"`
 	PasswordHash string `json:"-"`
 	Role         string `json:"role"` // admin / editor / viewer
+	Subject      string `json:"-"`    // OIDC sub（SSO 用户非空；按 subject 绑定而非用户名，防 IdP 同名接管本地账号）
 }
+
+// ErrConflict 状态冲突（如 SSO 用户名与本地账号撞名）
+var ErrConflict = errors.New("conflict")
 
 var ErrNotFound = errors.New("not found")
 
@@ -96,6 +100,7 @@ func Open(path, seedAdminPassword string) (*Store, string, error) {
 	if err := s.migrate(); err != nil {
 		return nil, "", err
 	}
+	s.seedOIDCEnv() // 环境变量注入 SSO 配置（settings 已有值不覆盖）
 	if seedAdminPassword != "" {
 		if err := s.SeedAdmin(seedAdminPassword); err != nil {
 			return nil, "", err
@@ -145,11 +150,21 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS audit(
 			id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, actor TEXT NOT NULL,
 			action TEXT NOT NULL, entity TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS settings(
+			key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {
 			return fmt.Errorf("初始化表结构: %w", err)
 		}
+	}
+	// 旧库升级：users 补 subject 列（已存在则忽略重复列错误）
+	if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN subject TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		return fmt.Errorf("升级 users 表: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_subject ON users(subject) WHERE subject != ''`); err != nil {
+		return fmt.Errorf("建 subject 索引: %w", err)
 	}
 	return nil
 }
@@ -188,12 +203,77 @@ func (s *Store) CreateUser(username, password, role string) error {
 // GetUser 按用户名取
 func (s *Store) GetUser(username string) (*User, error) {
 	u := &User{}
-	err := s.db.QueryRow(`SELECT username, password_hash, role FROM users WHERE username=?`, username).
-		Scan(&u.Username, &u.PasswordHash, &u.Role)
+	err := s.db.QueryRow(`SELECT username, password_hash, role, subject FROM users WHERE username=?`, username).
+		Scan(&u.Username, &u.PasswordHash, &u.Role, &u.Subject)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return u, err
+}
+
+// GetUserBySubject 按 OIDC sub 取（SSO 用户的唯一绑定键）
+func (s *Store) GetUserBySubject(subject string) (*User, error) {
+	u := &User{}
+	err := s.db.QueryRow(`SELECT username, password_hash, role, subject FROM users WHERE subject=?`, subject).
+		Scan(&u.Username, &u.PasswordHash, &u.Role, &u.Subject)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return u, err
+}
+
+// UpsertSSOUser SSO 登录落库：按 subject 找到则同步角色，否则建户。
+// 用户名被本地账号（subject 为空）占用时拒绝——不按用户名绑定，防 IdP 同名接管本地账号。
+// SSO 用户密码为随机值，本地密码登录不可用。
+func (s *Store) UpsertSSOUser(username, subject, role string) (*User, error) {
+	if u, err := s.GetUserBySubject(subject); err == nil {
+		if u.Role != role {
+			_, _ = s.db.Exec(`UPDATE users SET role=? WHERE username=?`, role, u.Username)
+			u.Role = role
+		}
+		return u, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	// 用户名占用检查：本地账号（subject 空）或其他 SSO 账号（sub 不同）都不让抢
+	if existing, err := s.GetUser(username); err == nil {
+		if existing.Subject != subject {
+			return nil, fmt.Errorf("%w: 用户名 %s 已被%s占用", ErrConflict, username,
+				map[bool]string{true: "本地账号", false: "其他 SSO 账号"}[existing.Subject == ""])
+		}
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	random, err := randomToken(24)
+	if err != nil {
+		return nil, err
+	}
+	hash, err := bcryptHash(random)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO users(username, password_hash, role, created_at, subject) VALUES(?,?,?,?,?)
+		 ON CONFLICT(username) DO UPDATE SET subject=excluded.subject, role=excluded.role`,
+		username, hash, role, now(), subject); err != nil {
+		return nil, err
+	}
+	return &User{Username: username, Role: role, Subject: subject}, nil
+}
+
+// ---------- 设置（键值） ----------
+
+// SettingGet 读设置（不存在返回空串）
+func (s *Store) SettingGet(key string) string {
+	var v string
+	_ = s.db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&v)
+	return v
+}
+
+// SettingSet 写设置（空串即停用该配置项）
+func (s *Store) SettingSet(key, value string) {
+	_, _ = s.db.Exec(`INSERT INTO settings(key,value) VALUES(?,?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
 }
 
 // ---------- 规则 ----------

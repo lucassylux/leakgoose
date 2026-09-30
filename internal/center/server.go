@@ -44,10 +44,13 @@ func NewServer(store *Store, ui fs.FS) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	// 认证
+	// 认证（oidc 三端点公开：config 探测 / login 发起 / callback 换码）
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/auth/me", s.requireUI(s.handleMe))
+	mux.HandleFunc("GET /api/auth/oidc/config", s.handleOidcConfig)
+	mux.HandleFunc("GET /api/auth/oidc/login", s.handleOidcLogin)
+	mux.HandleFunc("POST /api/auth/oidc/callback", s.handleOidcCallback)
 
 	// 规则（UI 会话）
 	mux.HandleFunc("GET /api/rules", s.requireUI(s.handleListRules))
@@ -165,18 +168,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
-	tok, err := randomHex(24)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	s.mu.Lock()
-	s.sessions[tok] = session{User: *u, Expires: time.Now().Add(sessionTTL)}
-	s.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{
-		Name: "lg_center_session", Value: tok, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, MaxAge: int(sessionTTL.Seconds()),
-	})
+	s.issueSession(w, *u)
 	writeJSON(w, http.StatusOK, map[string]any{"username": u.Username, "role": u.Role})
 }
 

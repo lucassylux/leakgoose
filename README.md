@@ -122,6 +122,25 @@ leakgoose rules sync https://center.internal:8280/api/packs/2026.09.30-1.yaml --
 # 钉版本：URL 带具体版本号，规则变更不漂移；两者响应均含 sha256 可核对
 ```
 
+## SSO 登录（OIDC，v0.3+，可选）
+
+规则中心可作为 OIDC 客户端接入统一身份认证中心（如 [WatchGoose](https://github.com/lucassylux/watchgoose)），授权码 + PKCE 流程：
+
+```bash
+# 环境变量首启注入（写入 settings 表；之后改配置直接改库或删库重建）
+OIDC_ISSUER=http://localhost:8080 \        # WatchGoose 的 issuer
+OIDC_CLIENT_ID=leakgoose-center \           # 管理台「应用接入」注册（PKCE 公开客户端可无 secret）
+OIDC_ALLOWED_USERS=admin,terence \          # 白名单：空 = SSO 整套休眠，仅本地账号登录
+OIDC_ADMIN_USERS=admin \                    # 管理员名单：名单内登录即 admin，其余 viewer
+leakgoose center serve -listen :8280 -db center.db
+```
+
+- 登录页自动出现「SSO 登录」按钮（未配置不显示，本地密码登录不受影响）
+- **账号绑定按 OIDC `sub`**（非用户名）：IdP 侧同名账号无法接管本地账号，撞名直接拒绝
+- SSO 用户本地密码为随机值，不可本地登录；角色以名单为准，每次登录同步
+- 反代部署回调地址不对时设 `OIDC_REDIRECT_BASE=https://rules.example.com`
+- WatchGoose 侧注册要点：授权模式 `authorization_code`，范围 `openid profile email`，强制 PKCE，回调 `http://<中心地址>/oidc/callback`
+
 ## 内置规则一览
 
 凭据向：阿里云 AK / 腾讯云 SecretId / AWS AKID / GitHub / GitLab / Slack / Google / npm 令牌 / PEM 私钥块 / URL 内嵌口令 / 口令赋值 / JWT。
@@ -130,7 +149,8 @@ PII 向：身份证号（校验位）/ 手机号（号段）/ 银行卡号（Luh
 ## 路线图
 
 - v0.2（已完成）：规则中心（`center serve` + 内嵌 Web UI + 版本化规则包 + `rules sync`）
-- v0.3：SARIF 输出（GitHub Code Scanning）、增量 diff 模式（PR 扫描）、GitHub Action 封装、可选结果上报审计
+- v0.3（已完成）：SSO 登录（OIDC 授权码 + PKCE，对接 WatchGoose 等标准 Provider）
+- 下一步：SARIF 输出（GitHub Code Scanning）、增量 diff 模式（PR 扫描）、GitHub Action 封装、可选结果上报审计
 - v1.0：规则生态（社区 PR 规则）
 
 ## License

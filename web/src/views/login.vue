@@ -19,6 +19,17 @@
             登 录
           </SkButton>
         </SkForm>
+        <template v-if="ssoEnabled">
+          <div class="divider"><span>或</span></div>
+          <SkButton block @click="goSso">
+            <svg class="sso-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="11" width="18" height="10" rx="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            SSO 登录
+          </SkButton>
+        </template>
       </div>
 
       <div class="foot">© {{ new Date().getFullYear() }} LeakGoose · 扫描在本地，规则集中管</div>
@@ -27,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { skMessage } from '@xzsoft/sketch-ui'
 import GooseLogo from '../components/GooseLogo.vue'
@@ -39,6 +50,22 @@ const route = useRoute()
 const loading = ref(false)
 const username = ref('')
 const password = ref('')
+const ssoEnabled = ref(false)
+
+// 探测 SSO 可用性：后端未配置 OIDC 时按钮不出现，本地登录不受影响
+onMounted(async () => {
+  try {
+    ssoEnabled.value = (await api.get<{ enabled: boolean }>('/api/auth/oidc/config')).enabled
+  } catch {
+    /* 探测失败按未启用处理 */
+  }
+})
+
+// SSO：后端 302 到 Provider 授权端点，回跳 /oidc/callback 由回调页完成登录
+function goSso(): void {
+  window.location.href = '/api/auth/oidc/login?prompt=select_account'
+}
+
 const doLogin = async () => {
   if (!username.value || !password.value) return skMessage.warning('请输入用户名与密码')
   if (loading.value) return
@@ -80,6 +107,13 @@ const doLogin = async () => {
   box-shadow: var(--sk-shadow-pop, 0 4px 16px rgba(0, 0, 0, 0.08));
   padding: 22px;
 }
+
+.divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 16px 0; color: var(--sk-text-faint, #aaa); font-size: var(--sk-font-size-xs, 12px);
+}
+.divider::before, .divider::after { content: ''; flex: 1; border-top: var(--sk-border-divider, 1px solid #e5e7eb); }
+.sso-icon { width: 14px; height: 14px; }
 
 .foot {
   margin-top: 18px; text-align: center;
