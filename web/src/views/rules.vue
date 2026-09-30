@@ -42,59 +42,62 @@
     <!-- 规则编辑器：表单 + 实时测试沙箱 + 用例 -->
     <SkModal v-model:open="editOpen" :title="form.id ? `编辑规则：${form.id}` : '新建规则'" width="980px">
       <div class="editor-grid">
-        <div class="form-col">
-          <!-- 双列布局（看门鹅弹窗表单同款）：正则/说明整行，其余成对；窄屏自动单列 -->
-          <SkForm ref="formRef" label-width="92px" class="form-two-col">
-            <div class="row-flex">
-              <SkFormField name="id" label="规则 ID" required :rules="fRules.id">
-                <SkInput v-model="form.id" :disabled="!!form._exists" placeholder="如 cn-passport" />
+        <!-- 表单通栏双列（看门鹅弹窗同款）：正则/说明整行，其余成对；窄屏自动单列 -->
+        <SkForm ref="formRef" label-width="92px">
+          <div class="row-flex">
+            <SkFormField name="id" label="规则 ID" required :rules="fRules.id">
+              <SkInput v-model="form.id" :disabled="!!form._exists" placeholder="如 cn-passport" />
+            </SkFormField>
+            <SkFormField name="name" label="名称" required :rules="fRules.name">
+              <SkInput v-model="form.name" placeholder="如 中国护照号" />
+            </SkFormField>
+            <SkFormField name="severity" label="严重级" required>
+              <SkSelect v-model="form.severity" :options="sevOptions" />
+            </SkFormField>
+            <SkFormField name="validate" label="验真函数">
+              <SkSelect v-model="form.validate" clearable placeholder="（无）" :options="validateOptions" />
+            </SkFormField>
+            <div class="span-2">
+              <SkFormField name="pattern" label="正则" required :rules="fRules.pattern">
+                <SkInput v-model="form.pattern" type="textarea" :rows="3" class="mono" placeholder="regexp2 语法，支持前后瞻 (?<!…)" />
               </SkFormField>
-              <SkFormField name="name" label="名称" required :rules="fRules.name">
-                <SkInput v-model="form.name" placeholder="如 中国护照号" />
-              </SkFormField>
-              <SkFormField name="severity" label="严重级" required>
-                <SkSelect v-model="form.severity" :options="sevOptions" />
-              </SkFormField>
-              <SkFormField name="validate" label="验真函数">
-                <SkSelect v-model="form.validate" clearable placeholder="（无）" :options="validateOptions" />
-              </SkFormField>
-              <div class="span-2">
-                <SkFormField name="pattern" label="正则" required :rules="fRules.pattern">
-                  <SkInput v-model="form.pattern" type="textarea" :rows="3" class="mono" placeholder="regexp2 语法，支持前后瞻 (?<!…)" />
-                </SkFormField>
-              </div>
-              <SkFormField name="paths" label="路径排除">
-                <SkInput v-model="excludePathsText" placeholder="逗号分隔，如 **/test/**, docs/**" />
-              </SkFormField>
-              <SkFormField name="enabled" label="状态">
-                <SkSelect v-model="form.enabled" :options="enabledOptions" />
-              </SkFormField>
-              <div class="span-2">
-                <SkFormField name="desc" label="说明">
-                  <SkInput v-model="form.description" :maxlength="200" placeholder="规则背景/负责人/豁免口径" />
-                </SkFormField>
-              </div>
             </div>
-          </SkForm>
-        </div>
-        <div class="sandbox-col">
-          <div class="sb-title">实时测试沙箱 <span class="sb-sub">（扫描引擎同源，所测即所得）</span></div>
-          <SkInput v-model="sandbox" type="textarea" :rows="6" class="mono" placeholder="粘贴样例文本，立即看命中…" @input="onSandboxInput" />
-          <div v-if="sandboxError" class="sb-error">{{ sandboxError }}</div>
-          <div v-else class="sb-hits">
-            <SkTag v-for="h in sandboxHits" :key="h" color="danger" class="mono">{{ h }}</SkTag>
-            <span v-if="sandbox && !sandboxHits.length && !sandboxError" class="sb-empty">（无命中）</span>
+            <SkFormField name="paths" label="路径排除">
+              <SkInput v-model="excludePathsText" placeholder="逗号分隔，如 **/test/**, docs/**" />
+            </SkFormField>
+            <SkFormField name="enabled" label="状态">
+              <SkSelect v-model="form.enabled" :options="enabledOptions" />
+            </SkFormField>
+            <div class="span-2">
+              <SkFormField name="desc" label="说明">
+                <SkInput v-model="form.description" :maxlength="200" placeholder="规则背景/负责人/豁免口径" />
+              </SkFormField>
+            </div>
           </div>
+        </SkForm>
 
-          <div class="sb-title" style="margin-top: 14px">用例 <span class="sb-sub">（发布前全量回归，期望不符即拒绝发布）</span></div>
-          <div v-for="(c, i) in cases" :key="i" class="case-row">
-            <SkInput v-model="c.input" class="mono" :placeholder="`样例 ${i + 1}`" />
-            <SkSelect v-model="c.expectMatch" class="case-expect" :options="expectOptions" />
-            <SkButton size="sm" variant="danger" @click="cases.splice(i, 1)">删</SkButton>
+        <!-- 沙箱与用例并排（窄屏堆叠） -->
+        <div class="sandbox-row">
+          <div class="sandbox-col">
+            <div class="sb-title">实时测试沙箱 <span class="sb-sub">（扫描引擎同源，所测即所得）</span></div>
+            <SkInput v-model="sandbox" type="textarea" :rows="5" class="mono" placeholder="粘贴样例文本，立即看命中…" @input="onSandboxInput" />
+            <div v-if="sandboxError" class="sb-error">{{ sandboxError }}</div>
+            <div v-else class="sb-hits">
+              <SkTag v-for="h in sandboxHits" :key="h" color="danger" class="mono">{{ h }}</SkTag>
+              <span v-if="sandbox && !sandboxHits.length && !sandboxError" class="sb-empty">（无命中）</span>
+            </div>
           </div>
-          <SkButton size="sm" style="margin-top: 6px" @click="cases.push({ ruleId: form.id || '', input: '', expectMatch: true })">
-            加用例
-          </SkButton>
+          <div class="cases-col">
+            <div class="sb-title">用例 <span class="sb-sub">（发布前全量回归，期望不符即拒绝发布）</span></div>
+            <div v-for="(c, i) in cases" :key="i" class="case-row">
+              <SkInput v-model="c.input" class="mono" :placeholder="`样例 ${i + 1}`" />
+              <SkSelect v-model="c.expectMatch" class="case-expect" :options="expectOptions" />
+              <SkButton size="sm" variant="danger" @click="cases.splice(i, 1)">删</SkButton>
+            </div>
+            <SkButton size="sm" style="margin-top: 6px" @click="cases.push({ ruleId: form.id || '', input: '', expectMatch: true })">
+              加用例
+            </SkButton>
+          </div>
         </div>
       </div>
       <template #footer>
@@ -278,15 +281,15 @@ const onSandboxInput = () => {
   font-size: 12px;
 }
 
-/* 编辑器总布局：左表单右沙箱；窄屏纵向堆叠 */
-.editor-grid { display: flex; gap: 18px; align-items: flex-start; }
-.form-col { flex: 1.25; min-width: 0; }
-.sandbox-col { flex: 1; min-width: 0; }
-@media (max-width: 900px) { .editor-grid { flex-direction: column; } }
+/* 编辑器总布局：表单通栏在上，沙箱/用例并排在下；窄屏纵向堆叠 */
+.editor-grid { display: flex; flex-direction: column; gap: 16px; }
+.sandbox-row { display: flex; gap: 18px; align-items: flex-start; }
+.sandbox-col, .cases-col { flex: 1; min-width: 0; }
+@media (max-width: 720px) { .sandbox-row { flex-direction: column; } }
 
 /* 弹窗表单双列（看门鹅同款实现）：成对字段各占一半，正则/说明整行；窄屏自动单列 */
 .row-flex { display: flex; flex-wrap: wrap; gap: 0 16px; }
-.row-flex > * { flex: 1 1 46%; min-width: 0; }
+.row-flex > * { flex: 1 1 42%; min-width: 0; }
 .row-flex > .span-2 { flex: 1 1 100%; }
 @media (max-width: 720px) { .row-flex > * { flex: 1 1 100%; } }
 
