@@ -19,10 +19,10 @@
           <SkInput v-model="form.redirectBase" placeholder="（自动推断）" />
         </SkFormField>
         <SkFormField name="allowed" label="登录白名单" required hint="允许 SSO 登录的账号，逗号分隔（粘贴空格/换行文本也可）；清空即整体停用 SSO">
-          <SkInput v-model="form.allowedUsers" type="textarea" :rows="3" placeholder="admin, terence" />
+          <LgTextarea v-model="form.allowedUsers" :rows="3" placeholder="admin, terence" />
         </SkFormField>
         <SkFormField name="admins" label="管理员名单" hint="名单内 SSO 登录即 admin 角色，其余 viewer；每次登录同步（逗号分隔）">
-          <SkInput v-model="form.adminUsers" type="textarea" :rows="2" placeholder="admin" />
+          <LgTextarea v-model="form.adminUsers" :rows="2" placeholder="admin" />
         </SkFormField>
         <SkFormField name="ops" label=" ">
           <SkButton variant="primary" :loading="saving" @click="save">保存配置</SkButton>
@@ -46,6 +46,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { skMessage } from '@xzsoft/sketch-ui'
 import { api, type Me } from '../api'
+import LgTextarea from '../components/LgTextarea.vue'
 
 const me = ref<Me | null>(null)
 const enabled = ref(false)

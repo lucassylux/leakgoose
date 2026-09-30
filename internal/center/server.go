@@ -57,7 +57,7 @@ func (s *Server) Handler() http.Handler {
 	// 规则（UI 会话）
 	mux.HandleFunc("GET /api/rules", s.requireUI(s.handleListRules))
 	mux.HandleFunc("POST /api/rules", s.requireRole("editor", s.handleSaveRule))
-	mux.HandleFunc("GET /api/rules/test", s.requireUI(s.handleSandbox))
+	mux.HandleFunc("POST /api/rules/test", s.requireUI(s.handleSandbox))
 	mux.HandleFunc("PUT /api/rules/{rid}", s.requireRole("editor", s.handleSaveRule))
 	mux.HandleFunc("DELETE /api/rules/{rid}", s.requireRole("editor", s.handleDeleteRule))
 	mux.HandleFunc("GET /api/rules/{rid}/cases", s.requireUI(s.handleListCases))

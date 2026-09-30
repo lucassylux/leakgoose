@@ -42,7 +42,7 @@
     <!-- 规则编辑器：表单 + 实时测试沙箱 + 用例 -->
     <SkModal v-model:open="editOpen" :title="form.id ? `编辑规则：${form.id}` : '新建规则'" width="980px">
       <div class="editor-grid">
-        <!-- 表单通栏双列（看门鹅弹窗同款）：正则/说明整行，其余成对；窄屏自动单列 -->
+        <!-- ① 基本信息：双列紧凑表单（看门鹅弹窗同款） -->
         <SkForm ref="formRef" label-width="92px">
           <div class="row-flex">
             <SkFormField name="id" label="规则 ID" required :rules="fRules.id">
@@ -57,17 +57,12 @@
             <SkFormField name="validate" label="验真函数">
               <SkSelect v-model="form.validate" clearable placeholder="（无）" :options="validateOptions" />
             </SkFormField>
-            <div class="span-2">
-              <SkFormField name="pattern" label="正则" required :rules="fRules.pattern">
-                <SkInput v-model="form.pattern" type="textarea" :rows="3" class="mono" placeholder="regexp2 语法，支持前后瞻 (?<!…)" />
-              </SkFormField>
-            </div>
             <SkFormField name="paths" label="路径排除">
               <SkInput v-model="excludePathsText" placeholder="逗号分隔，如 **/test/**, docs/**" />
             </SkFormField>
-              <SkFormField name="enabled" label="状态">
-                <SkSelect v-model="form.enabled" :options="enabledBoolOptions" />
-              </SkFormField>
+            <SkFormField name="enabled" label="状态">
+              <SkSelect v-model="form.enabled" :options="enabledBoolOptions" />
+            </SkFormField>
             <div class="span-2">
               <SkFormField name="desc" label="说明">
                 <SkInput v-model="form.description" :maxlength="200" placeholder="规则背景/负责人/豁免口径" />
@@ -76,28 +71,34 @@
           </div>
         </SkForm>
 
-        <!-- 沙箱与用例并排（窄屏堆叠） -->
-        <div class="sandbox-row">
+        <!-- ② 正则 ↔ 实时沙箱 并排：写正则立刻试，天然一组的两件事 -->
+        <div class="test-row">
+          <div class="pattern-col">
+            <div class="sb-title">正则 <span class="sb-sub">（regexp2 语法，支持前后瞻断言）</span> <span v-if="!form.pattern" class="sb-req">必填</span></div>
+            <LgTextarea v-model="form.pattern" :rows="7" placeholder="(?&lt;!&#92;d)1[3-9]&#92;d{9}(?!&#92;d)" />
+          </div>
           <div class="sandbox-col">
             <div class="sb-title">实时测试沙箱 <span class="sb-sub">（扫描引擎同源，所测即所得）</span></div>
-            <SkInput v-model="sandbox" type="textarea" :rows="5" class="mono" placeholder="粘贴样例文本，立即看命中…" @input="onSandboxInput" />
+            <LgTextarea v-model="sandbox" :rows="7" placeholder="粘贴样例文本，立即看命中…" @update:model-value="onSandboxInput" />
             <div v-if="sandboxError" class="sb-error">{{ sandboxError }}</div>
             <div v-else class="sb-hits">
               <SkTag v-for="h in sandboxHits" :key="h" color="danger" class="mono">{{ h }}</SkTag>
               <span v-if="sandbox && !sandboxHits.length && !sandboxError" class="sb-empty">（无命中）</span>
             </div>
           </div>
-          <div class="cases-col">
-            <div class="sb-title">用例 <span class="sb-sub">（发布前全量回归，期望不符即拒绝发布）</span></div>
-            <div v-for="(c, i) in cases" :key="i" class="case-row">
-              <SkInput v-model="c.input" class="mono" :placeholder="`样例 ${i + 1}`" />
-              <SkSelect v-model="c.expectMatch" class="case-expect" :options="expectOptions" />
-              <SkButton size="sm" variant="danger" @click="cases.splice(i, 1)">删</SkButton>
-            </div>
-            <SkButton size="sm" style="margin-top: 6px" @click="cases.push({ ruleId: form.id || '', input: '', expectMatch: true })">
-              加用例
-            </SkButton>
+        </div>
+
+        <!-- ③ 用例：全宽行式列表（发布前全量回归，期望不符即拒绝发布） -->
+        <div class="cases-block">
+          <div class="sb-title">用例 <span class="sb-sub">（每条 = 样本文本 + 期望；发布前全量回归，期望不符即拒绝发布）</span></div>
+          <div v-for="(c, i) in cases" :key="i" class="case-row">
+            <SkInput v-model="c.input" class="mono" :placeholder="`样例 ${i + 1}`" />
+            <SkSelect v-model="c.expectMatch" class="case-expect" :options="expectOptions" />
+            <SkButton size="sm" variant="danger" @click="cases.splice(i, 1)">删</SkButton>
           </div>
+          <SkButton size="sm" style="margin-top: 6px" @click="cases.push({ ruleId: form.id || '', input: '', expectMatch: true })">
+            加用例
+          </SkButton>
         </div>
       </div>
       <template #footer>
@@ -113,6 +114,7 @@ import { computed, onMounted, reactive, ref, nextTick } from 'vue'
 import { skMessage } from '@xzsoft/sketch-ui'
 import type { SkFormInstance, SkRule } from '../types/form'
 import SearchForm from '../components/SearchForm.vue'
+import LgTextarea from '../components/LgTextarea.vue'
 import { api, type Rule, type TestCase } from '../api'
 
 interface EditForm extends Rule { _exists?: boolean }
@@ -206,7 +208,6 @@ function blank(): EditForm {
 const fRules: Record<string, SkRule[]> = {
   id: [{ required: true, message: '规则 ID 必填' }, { pattern: /^[a-z0-9][a-z0-9-]*$/, message: '小写字母数字与中划线' }],
   name: [{ required: true, message: '名称必填' }],
-  pattern: [{ required: true, message: '正则必填' }],
 }
 
 const openEdit = async (r: Rule | null) => {
@@ -218,6 +219,7 @@ const openEdit = async (r: Rule | null) => {
 }
 
 const save = async () => {
+  if (!form.pattern.trim()) return skMessage.warning('正则必填')
   try { await formRef.value?.validate() } catch { return }
   saving.value = true
   try {
@@ -287,11 +289,14 @@ const onSandboxInput = () => {
   font-size: 12px;
 }
 
-/* 编辑器总布局：表单通栏在上，沙箱/用例并排在下；窄屏纵向堆叠 */
+/* 编辑器三段式：基本信息（双列表单）→ 正则↔沙箱并排 → 用例全宽 */
 .editor-grid { display: flex; flex-direction: column; gap: 16px; }
-.sandbox-row { display: flex; gap: 18px; align-items: flex-start; }
-.sandbox-col, .cases-col { flex: 1; min-width: 0; }
-@media (max-width: 720px) { .sandbox-row { flex-direction: column; } }
+.test-row { display: flex; gap: 18px; align-items: flex-start; }
+.pattern-col { flex: 1.1; min-width: 0; }
+.sandbox-col { flex: 1; min-width: 0; }
+.cases-block { min-width: 0; }
+.sb-req { color: var(--sk-danger, #d03050); font-size: 12px; }
+@media (max-width: 720px) { .test-row { flex-direction: column; } }
 
 /* 弹窗表单双列（看门鹅同款实现）：成对字段各占一半，正则/说明整行；竖向 12px 行距防贴顶；窄屏自动单列 */
 .row-flex { display: flex; flex-wrap: wrap; gap: 12px 16px; }
