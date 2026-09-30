@@ -13,7 +13,7 @@
       </SkFormField>
     </search-form>
 
-    <SkTable :columns="columns" :data="rows" :loading="loading" row-key="id" size="md">
+    <SkTable :columns="columns" :data="rows" :loading="loading" row-key="id" size="md" :scroll-x="1100">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'severity'">
           <SkTag :color="sevColor[record.severity]">{{ record.severity }}</SkTag>
@@ -130,14 +130,16 @@ const expectOptions = [
   { label: '不应命中', value: false },
 ]
 
+// 长单 token 列（ID/验真/更新时间）一律不换行：列级 ellipsis + 悬停看全量；
+// 窄屏靠 scrollX 横滚，不挤压换行
 const columns = [
-  { title: 'ID', key: 'id', width: 180 },
-  { title: '名称', key: 'name', width: 180 },
+  { title: 'ID', key: 'id', width: 190, ellipsis: true },
+  { title: '名称', key: 'name', width: 170, ellipsis: true },
   { title: '严重级', key: 'severity', width: 90 },
-  { title: '正则', key: 'pattern' },
-  { title: '验真', key: 'validate', width: 200 },
+  { title: '正则', key: 'pattern', ellipsis: true },
+  { title: '验真', key: 'validate', width: 175, ellipsis: true },
   { title: '状态', key: 'enabled', width: 80 },
-  { title: '更新', key: 'updatedAt', width: 170 },
+  { title: '更新', key: 'updatedAt', width: 150, ellipsis: true },
   { title: '操作', key: 'ops', width: 150, fixed: 'right' },
 ]
 
