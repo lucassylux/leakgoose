@@ -50,10 +50,10 @@
         <SkForm ref="formRef" label-width="92px">
           <div class="row-flex">
             <SkFormField name="id" label="规则 ID" required :rules="fRules.id">
-              <SkInput v-model="form.id" :disabled="!!form._exists" placeholder="如 cn-passport" />
+              <SkInput v-model="form.id" :disabled="!!form._exists" placeholder="如 cn-mobile" />
             </SkFormField>
             <SkFormField name="name" label="名称" required :rules="fRules.name">
-              <SkInput v-model="form.name" placeholder="如 中国护照号" />
+              <SkInput v-model="form.name" placeholder="如 中国大陆手机号" />
             </SkFormField>
             <SkFormField name="severity" label="严重级" required>
               <SkSelect v-model="form.severity" :options="sevOptions" />
