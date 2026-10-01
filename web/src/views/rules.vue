@@ -45,9 +45,9 @@
 
     <!-- 规则编辑器：表单 + 实时测试沙箱 + 用例 -->
     <SkModal v-model:open="editOpen" :title="form.id ? `编辑规则：${form.id}` : '新建规则'" width="980px">
-      <div class="editor-grid">
-        <!-- ① 基本信息：双列紧凑表单（看门鹅弹窗同款） -->
-        <SkForm ref="formRef" label-width="92px">
+      <!-- 整个编辑区收进一个 SkForm：三段布局（sk-form 自带纵向 flex+间距），全部必填走行内表单校验（看门鹅同款） -->
+      <SkForm ref="formRef" label-width="92px" class="editor-grid">
+        <div>
           <div class="row-flex">
             <SkFormField name="id" label="规则 ID" required :rules="fRules.id">
               <SkInput v-model="form.id" :disabled="!!form._exists" placeholder="如 cn-mobile" />
@@ -73,13 +73,15 @@
               </SkFormField>
             </div>
           </div>
-        </SkForm>
+        </div>
 
-        <!-- ② 正则 ↔ 实时沙箱 并排：写正则立刻试，天然一组的两件事 -->
+        <!-- ② 正则 ↔ 实时沙箱 并排：写正则立刻试，天然一组的两件事；正则挂表单规则行内校验 -->
         <div class="test-row">
           <div class="pattern-col">
-            <div class="sb-title">正则 <span class="sb-sub">（regexp2 语法，支持前后瞻断言）</span> <span v-if="!form.pattern" class="sb-req">必填</span></div>
-            <LgTextarea v-model="form.pattern" :rows="7" placeholder="(?&lt;!&#92;d)1[3-9]&#92;d{9}(?!&#92;d)" />
+            <div class="sb-title">正则 <span class="sb-sub">（regexp2 语法，支持前后瞻断言）</span></div>
+            <SkFormField name="pattern" required :rules="fRules.pattern">
+              <LgTextarea v-model="form.pattern" :rows="7" placeholder="(?&lt;!&#92;d)1[3-9]&#92;d{9}(?!&#92;d)" />
+            </SkFormField>
           </div>
           <div class="sandbox-col">
             <div class="sb-title">实时测试沙箱 <span class="sb-sub">（扫描引擎同源，所测即所得）</span></div>
@@ -104,7 +106,7 @@
             加用例
           </SkButton>
         </div>
-      </div>
+      </SkForm>
       <template #footer>
         <SkButton @click="editOpen = false">取消</SkButton>
         <SkButton variant="primary" :loading="saving" style="margin-left: 8px" @click="save">保存草稿</SkButton>
@@ -212,6 +214,7 @@ function blank(): EditForm {
 const fRules: Record<string, SkRule[]> = {
   id: [{ required: true, message: '规则 ID 必填' }, { pattern: /^[a-z0-9][a-z0-9-]*$/, message: '小写字母数字与中划线' }],
   name: [{ required: true, message: '名称必填' }],
+  pattern: [{ required: true, message: '正则必填' }],
 }
 
 const openEdit = async (r: Rule | null) => {
@@ -223,7 +226,7 @@ const openEdit = async (r: Rule | null) => {
 }
 
 const save = async () => {
-  if (!form.pattern.trim()) return skMessage.warning('正则必填')
+  // 全部必填校验走表单规则（行内红字），不再弹 tip
   try { await formRef.value?.validate() } catch { return }
   saving.value = true
   try {
@@ -293,13 +296,11 @@ const onSandboxInput = () => {
   font-size: 12px;
 }
 
-/* 编辑器三段式：基本信息（双列表单）→ 正则↔沙箱并排 → 用例全宽 */
-.editor-grid { display: flex; flex-direction: column; gap: 16px; }
+/* 编辑器三段式：容器即 SkForm（自带纵向 flex 与 12px 段间距），此处只管段内部 */
 .test-row { display: flex; gap: 18px; align-items: flex-start; }
 .pattern-col { flex: 1.1; min-width: 0; }
 .sandbox-col { flex: 1; min-width: 0; }
 .cases-block { min-width: 0; }
-.sb-req { color: var(--sk-danger, #d03050); font-size: 12px; }
 @media (max-width: 720px) { .test-row { flex-direction: column; } }
 
 /* 弹窗表单双列（看门鹅同款实现）：成对字段各占一半，正则/说明整行；竖向 12px 行距防贴顶；窄屏自动单列 */
