@@ -62,14 +62,14 @@
               <SkSelect v-model="form.validate" clearable placeholder="请选择" :options="validateOptions" />
             </SkFormField>
             <SkFormField name="paths" label="路径排除">
-              <SkInput v-model="excludePathsText" placeholder="逗号分隔，如 **/test/**, docs/**" />
+              <SkInput v-model="excludePathsText" placeholder="逗号分隔，如 sql/**, **/it-init*.sql" />
             </SkFormField>
             <SkFormField name="enabled" label="状态">
               <SkSwitch v-model="form.enabled" />
             </SkFormField>
             <div class="span-2">
               <SkFormField name="desc" label="说明">
-                <LgTextarea v-model="form.description" :rows="2" placeholder="规则背景/负责人/豁免口径" />
+                <LgTextarea v-model="form.description" :rows="2" placeholder="如：种子/演示数据中的手机号按口径豁免，负责人 terence" />
               </SkFormField>
             </div>
           </div>
