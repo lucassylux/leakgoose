@@ -6,12 +6,8 @@
 
     <SkCard title="读令牌（Bearer；明文仅创建时显示一次）" style="margin-top: 14px">
       <div class="token-ops">
-        <SkInput v-model="newTokenName" placeholder="令牌用途，如 watchgoose-ci" style="width: 260px" />
-        <SkButton variant="primary" size="sm" :disabled="!me || me.role !== 'admin'" @click="createToken">新建令牌</SkButton>
+        <SkButton variant="primary" size="sm" :disabled="!me || me.role !== 'admin'" @click="openCreate">新建令牌</SkButton>
       </div>
-      <SkAlert v-if="freshToken" tone="warning" style="margin: 10px 0">
-        新令牌（仅此一次显示，请立即配置到 CI secrets）：<b class="mono">{{ freshToken }}</b>
-      </SkAlert>
       <SkTable :columns="columns" :data="tokens" :loading="loading" row-key="id" size="sm">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'createdAt'">
@@ -28,6 +24,33 @@
         </template>
       </SkTable>
     </SkCard>
+
+    <!-- 新建令牌弹窗：填用途 → 创建 → 原地展示一次性明文（复制后关闭） -->
+    <SkModal v-model:open="createOpen" title="新建令牌" width="520px">
+      <template v-if="!freshToken">
+        <SkForm ref="tokenFormRef" label-width="60px">
+          <SkFormField label="用途" name="name" required :rules="[{ required: true, message: '用途必填（如 watchgoose-ci，便于审计识别）' }]">
+            <SkInput v-model="newTokenName" placeholder="如 watchgoose-ci" @keyup.enter="createToken" />
+          </SkFormField>
+        </SkForm>
+      </template>
+      <template v-else>
+        <SkAlert tone="warning" style="margin: 0 0 12px">
+          新令牌仅此一次显示，请立即复制并配置到 CI secrets——关闭后无法再查看。
+        </SkAlert>
+        <div class="fresh-token">
+          <code class="mono">{{ freshToken }}</code>
+          <SkButton size="sm" @click="copyToken">复制</SkButton>
+        </div>
+      </template>
+      <template #footer>
+        <template v-if="!freshToken">
+          <SkButton @click="createOpen = false">取消</SkButton>
+          <SkButton variant="primary" :loading="creating" style="margin-left: 8px" @click="createToken">确认创建</SkButton>
+        </template>
+        <SkButton v-else variant="primary" @click="closeCreate">我已保存，关闭</SkButton>
+      </template>
+    </SkModal>
   </div>
 </template>
 
@@ -35,6 +58,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { skMessage } from '@xzsoft/sketch-ui'
 import { api, type TokenRow, type PackRow, type Me } from '../api'
+import type { SkFormInstance } from '../types/form'
 
 const me = ref<Me | null>(null)
 const tokens = ref<TokenRow[]>([])
@@ -42,6 +66,28 @@ const latest = ref<PackRow | null>(null)
 const loading = ref(false)
 const newTokenName = ref('')
 const freshToken = ref('')
+const createOpen = ref(false)
+const creating = ref(false)
+const tokenFormRef = ref<SkFormInstance | null>(null)
+
+const openCreate = () => {
+  freshToken.value = ''
+  newTokenName.value = ''
+  createOpen.value = true
+}
+const closeCreate = () => {
+  createOpen.value = false
+  freshToken.value = ''
+  load()
+}
+const copyToken = async () => {
+  try {
+    await navigator.clipboard.writeText(freshToken.value)
+    skMessage.success('令牌已复制')
+  } catch {
+    skMessage.warning('复制失败，请手动选择复制')
+  }
+}
 
 // RFC3339 → 本地可读 "YYYY-MM-DD HH:mm"；lastUsed 为空表示从未使用
 const fmtTime = (s?: string) => (s ? s.replace('T', ' ').slice(0, 16) : '—')
@@ -85,14 +131,17 @@ const ciSnippet = computed(() => {
 })
 
 const createToken = async () => {
-  if (!newTokenName.value.trim()) return skMessage.warning('请填写令牌用途')
+  // 必填校验走表单规则（行内红字），不再弹 tip
+  try { await tokenFormRef.value?.validate() } catch { return }
+  if (creating.value) return
+  creating.value = true
   try {
     const r = await api.post<{ token: string }>('/api/tokens', { name: newTokenName.value.trim() })
-    freshToken.value = r.token
-    newTokenName.value = ''
-    load()
+    freshToken.value = r.token // 弹窗原地切换为一次性明文展示态
   } catch (e) {
     skMessage.error((e as Error).message)
+  } finally {
+    creating.value = false
   }
 }
 
@@ -109,4 +158,6 @@ const removeToken = async (id: number) => {
 
 <style scoped>
 .token-ops { display: flex; gap: 10px; margin-bottom: 10px; }
+.fresh-token { display: flex; align-items: center; gap: 10px; background: var(--sk-muted-soft, #f5f6f8); border: var(--sk-border-thin, 1px solid #e5e7eb); border-radius: 8px; padding: 10px 12px; }
+.fresh-token code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 12px; }
 </style>
