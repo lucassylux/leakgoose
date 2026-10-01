@@ -11,11 +11,19 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+  // 15s 超时：后端重启/连接断开时 fetch 会无限悬挂，UI 既无报错也无反馈
+  //（表现为点击"哑火"），超时后抛错走统一错误提示
   const resp = await fetch(url, {
     method,
     credentials: 'same-origin',
     headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15_000),
+  }).catch((e: unknown) => {
+    if (e instanceof DOMException && e.name === 'TimeoutError') {
+      throw new ApiError(0, '请求超时（15s），请检查规则中心服务是否在线')
+    }
+    throw new ApiError(0, '网络请求失败：' + (e instanceof Error ? e.message : String(e)))
   })
   const text = await resp.text()
   const data = text ? (JSON.parse(text) as unknown) : null

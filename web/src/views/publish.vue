@@ -2,23 +2,35 @@
   <div>
     <SkCard>
       <div class="pub-row">
-        <div style="flex: 1">
-          <div class="pub-label">发布说明（changelog，必填——进入版本历史与审计）</div>
-          <SkInput v-model="changelog" type="textarea" :rows="2" placeholder="如：新增中国护照号规则；cn-mobile 收窄测试路径豁免" />
+        <div v-if="latest" class="latest" style="flex: 1">
+          当前已发布：<b>{{ latest.version }}</b>
+          <span class="mono">sha256 {{ latest.sha256.slice(0, 12) }}…</span>
+          <span>{{ fmtTime(latest.publishedAt) }} · {{ latest.publishedBy }}</span>
+          <span class="changelog">{{ latest.changelog }}</span>
         </div>
-        <SkButton variant="primary" :loading="publishing" :disabled="!me || me.role !== 'admin'" @click="publish">
+        <div v-else class="latest" style="flex: 1">尚未发布过版本</div>
+        <SkButton variant="primary" :disabled="!me || me.role !== 'admin'" @click="publishOpen = true">
           发布新版本
         </SkButton>
       </div>
-      <div v-if="latest" class="latest">
-        当前已发布：<b>{{ latest.version }}</b>
-        <span class="mono">sha256 {{ latest.sha256.slice(0, 12) }}…</span>
-        <span>{{ fmtTime(latest.publishedAt) }} · {{ latest.publishedBy }}</span>
-        <span class="changelog">{{ latest.changelog }}</span>
-      </div>
-      <div v-else class="latest">尚未发布过版本</div>
       <div v-if="me && me.role !== 'admin'" class="no-perm">仅管理员可发布（编辑角色可维护规则草稿）</div>
     </SkCard>
+
+    <!-- 发布弹窗：点「发布新版本」后填写说明（必填行内校验），确认才真正发布 -->
+    <SkModal v-model:open="publishOpen" title="发布新版本" width="560px">
+      <SkAlert tone="info" style="margin-bottom: 12px">
+        发布前会对全部启用规则跑用例回归，期望不符将拒绝发布；发布后生成不可变版本（版本号 + sha256）。
+      </SkAlert>
+      <SkForm ref="pubFormRef" label-width="80px">
+        <SkFormField label="发布说明" name="changelog" required :rules="[{ required: true, message: '发布说明必填（进入版本历史与审计）' }]">
+          <LgTextarea v-model="changelog" :rows="3" placeholder="如：新增中国护照号规则；cn-mobile 收窄测试路径豁免" />
+        </SkFormField>
+      </SkForm>
+      <template #footer>
+        <SkButton @click="publishOpen = false">取消</SkButton>
+        <SkButton variant="primary" :loading="publishing" style="margin-left: 8px" @click="publish">确认发布</SkButton>
+      </template>
+    </SkModal>
 
     <SkTable style="margin-top: 14px" :columns="columns" :data="packs" :loading="loading" row-key="version" size="md">
       <template #bodyCell="{ column, record }">
@@ -47,6 +59,8 @@
 import { onMounted, ref } from 'vue'
 import { skMessage } from '@xzsoft/sketch-ui'
 import { api, type PackRow, type Me } from '../api'
+import LgTextarea from '../components/LgTextarea.vue'
+import type { SkFormInstance } from '../types/form'
 
 const me = ref<Me | null>(null)
 const latest = ref<PackRow | null>(null)
@@ -54,6 +68,8 @@ const packs = ref<PackRow[]>([])
 const loading = ref(false)
 const changelog = ref('')
 const publishing = ref(false)
+const publishOpen = ref(false)
+const pubFormRef = ref<SkFormInstance | null>(null)
 const yamlOpen = ref(false)
 const yamlText = ref('')
 const viewingVersion = ref('')
@@ -85,13 +101,15 @@ const load = async () => {
 onMounted(load)
 
 const publish = async () => {
-  if (!changelog.value.trim()) return skMessage.warning('请填写发布说明')
+  // 必填校验走表单规则（行内红字），不再弹 tip
+  try { await pubFormRef.value?.validate() } catch { return }
   if (publishing.value) return
   publishing.value = true
   try {
     const p = await api.post<PackRow>('/api/packs', { changelog: changelog.value })
     skMessage.success(`已发布 ${p.version}（sha256 ${p.sha256.slice(0, 12)}…）`)
     changelog.value = ''
+    publishOpen.value = false
     load()
   } catch (e) {
     // 422 = 用例回归失败，错误信息逐条列出——直接展示给操作者
