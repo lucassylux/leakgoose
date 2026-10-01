@@ -1,5 +1,6 @@
 <template>
-  <div>
+  <div class="page-fill">
+    <SkCard title="审计日志" class="fill-card">
     <SkTable :columns="columns" :data="rows" :loading="loading" row-key="id" size="md">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'action'">
@@ -16,6 +17,7 @@
         </template>
       </template>
     </SkTable>
+    </SkCard>
   </div>
 </template>
 

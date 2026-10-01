@@ -1,6 +1,6 @@
 <template>
-  <div>
-    <SkCard>
+  <div class="page-fill">
+    <SkCard title="发布与版本" class="fill-card">
       <div class="pub-row">
         <div v-if="latest" class="latest" style="flex: 1">
           当前已发布：<b>{{ latest.version }}</b>
@@ -14,7 +14,6 @@
         </SkButton>
       </div>
       <div v-if="me && me.role !== 'admin'" class="no-perm">仅管理员可发布（编辑角色可维护规则草稿）</div>
-    </SkCard>
 
     <!-- 发布弹窗：点「发布新版本」后填写说明（必填行内校验），确认才真正发布 -->
     <SkModal v-model:open="publishOpen" title="发布新版本" width="560px">
@@ -32,7 +31,7 @@
       </template>
     </SkModal>
 
-    <SkTable style="margin-top: 14px" :columns="columns" :data="packs" :loading="loading" row-key="version" size="md">
+    <SkTable style="margin-top: 12px" :columns="columns" :data="packs" :loading="loading" row-key="version" size="md">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'sha256'">
           <span class="mono" :title="record.sha256">{{ record.sha256.slice(0, 12) }}…</span>
@@ -48,6 +47,7 @@
         </template>
       </template>
     </SkTable>
+    </SkCard>
 
     <SkModal v-model:open="yamlOpen" :title="`规则包 ${viewingVersion}.yaml`" width="720px">
       <pre class="code">{{ yamlText }}</pre>

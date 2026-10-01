@@ -1,6 +1,6 @@
 <template>
-  <div>
-    <SkCard title="SSO 登录（OIDC）">
+  <div class="settings-layout">
+    <SkCard title="SSO 登录（OIDC）" class="flex-card">
       <template #extra>
         <SkTag :color="enabled ? 'success' : 'default'">{{ enabled ? '已启用' : '未启用' }}</SkTag>
       </template>
@@ -31,7 +31,7 @@
       </SkForm>
     </SkCard>
 
-    <SkCard title="对接看门鹅速查" style="margin-top: 14px">
+    <SkCard title="对接看门鹅速查">
       <ol class="guide">
         <li>看门鹅管理台「应用接入」新建应用：<code>authorization_code</code> + 范围 <code>openid profile email</code> + 强制 PKCE，回调地址填 <code>{{ redirectHint }}</code></li>
         <li>本页填 Issuer（<code>http://localhost:8080</code>）与 Client ID；公开客户端 Secret 留空</li>
@@ -122,6 +122,8 @@ interface OidcSettings {
 </script>
 
 <style scoped>
+.settings-layout { display: flex; flex-direction: column; gap: 14px; height: 100%; }
+.settings-layout > .flex-card { flex: 1; min-height: 0; }
 .saved-tip { margin-left: 12px; font-size: 12px; color: var(--sk-text-faint, #aaa); }
 .guide { padding-left: 20px; margin: 0; color: var(--sk-text-muted); font-size: 13px; line-height: 2; }
 .guide code { background: var(--sk-muted-soft, #f5f6f8); border-radius: 4px; padding: 1px 6px; font-size: 12px; }

@@ -1,10 +1,10 @@
 <template>
-  <div>
+  <div class="access-layout">
     <SkCard title="CI 拉取规则包（钉版本 + sha256 校验，供应链口径与二进制分发一致）">
       <pre class="code">{{ ciSnippet }}</pre>
     </SkCard>
 
-    <SkCard title="读令牌（Bearer；明文仅创建时显示一次）" style="margin-top: 14px">
+    <SkCard title="读令牌（Bearer；明文仅创建时显示一次）" class="flex-card">
       <div class="token-ops">
         <SkButton variant="primary" size="sm" :disabled="!me || me.role !== 'admin'" @click="openCreate">新建令牌</SkButton>
       </div>
@@ -157,6 +157,8 @@ const removeToken = async (id: number) => {
 </script>
 
 <style scoped>
+.access-layout { display: flex; flex-direction: column; gap: 14px; height: 100%; }
+.access-layout > .flex-card { flex: 1; min-height: 0; }
 .token-ops { display: flex; gap: 10px; margin-bottom: 10px; }
 .fresh-token { display: flex; align-items: center; gap: 10px; background: var(--sk-muted-soft, #f5f6f8); border: var(--sk-border-thin, 1px solid #e5e7eb); border-radius: 8px; padding: 10px 12px; }
 .fresh-token code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 12px; }

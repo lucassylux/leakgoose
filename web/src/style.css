@@ -53,3 +53,6 @@ pre.code {
   display: flex;
   flex-direction: column;
 }
+
+/* 页面根占满（fill-card 高度链第一环：content > .page-fill > .fill-card） */
+.page-fill { height: 100%; }
