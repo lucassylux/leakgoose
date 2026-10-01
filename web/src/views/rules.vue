@@ -1,5 +1,5 @@
 <template>
-  <SkCard title="规则维护">
+  <SkCard title="规则维护" class="fill-card">
     <search-form>
       <SkFormField label="ID / 名称" name="f">
         <SkInput v-model="query.q" placeholder="请输入" clearable @keyup.enter="load" />
@@ -17,7 +17,7 @@
       <SkButton variant="primary" @click="openEdit(null)">新建规则</SkButton>
     </span>
 
-    <SkTable :columns="columns" :data="rows" :loading="loading" row-key="id" size="md" :scroll-x="1100">
+    <SkTable :columns="columns" :data="rows" :loading="loading" row-key="id" size="md" :scroll-x="1190">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'severity'">
           <SkTag :color="sevColor[record.severity]">{{ sevLabel(record.severity) }}</SkTag>
@@ -30,6 +30,11 @@
         </template>
         <template v-else-if="column.key === 'pattern'">
           <span class="mono cell-regex" :title="record.pattern">{{ record.pattern }}</span>
+        </template>
+        <template v-else-if="column.key === 'drift'">
+          <SkTag v-if="diffOf(record) === 'new'" color="info">新增</SkTag>
+          <SkTag v-else-if="diffOf(record) === 'modified'" color="warning">已修改</SkTag>
+          <span v-else class="drift-none">—</span>
         </template>
         <template v-else-if="column.key === 'updatedAt'">
           {{ fmtTime(record.updatedAt) }}
@@ -175,6 +180,7 @@ const columns = [
   { title: '正则', key: 'pattern' },
   { title: '验真', key: 'validate', width: 175, ellipsis: true },
   { title: '状态', key: 'enabled', width: 80, align: 'center' },
+  { title: '变更', key: 'drift', width: 84, align: 'center' },
   { title: '更新', key: 'updatedAt', width: 150, ellipsis: true, align: 'center' },
   { title: '操作', key: 'ops', width: 150, fixed: 'right', align: 'center' },
 ]
@@ -197,7 +203,27 @@ const reset = () => {
   query.enabled = null
   load()
 }
-onMounted(() => { loadSevDict(); load() })
+// 与最新已发布版本的差异：拉发布快照建索引（发布只会发生在发布页，挂载时取一次即可）
+const published = ref<Map<string, Rule> | null>(null)
+const loadPublished = async () => {
+  try {
+    const p = await api.get<PackLatest>('/api/packs/latest')
+    published.value = new Map((p.rules || []).map(r => [r.id, r]))
+  } catch {
+    published.value = new Map() // 从未发布：全部视为新增
+  }
+}
+const diffOf = (r: Rule): 'new' | 'modified' | 'same' => {
+  const pub = published.value?.get(r.id)
+  if (!pub) return 'new'
+  // 发布包只含启用规则且无 enabled 字段：草稿停用即为变更；其余按内容对比
+  if (!r.enabled) return 'modified'
+  const norm = (x: Rule) => JSON.stringify([x.name, x.severity, x.pattern, x.validate || '', (x.keywords || []).join(), (x['include-paths'] || []).join(), (x['exclude-paths'] || []).join()])
+  return norm(r) === norm(pub) ? 'same' : 'modified'
+}
+interface PackLatest { version: string; sha256: string; rules: Rule[] }
+
+onMounted(() => { loadSevDict(); loadPublished(); load() })
 
 // ---------- 编辑器 ----------
 const editOpen = ref(false)
@@ -318,4 +344,5 @@ const onSandboxInput = () => {
 .case-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
 .case-row .sk-input { flex: 1; }
 .case-expect { width: 118px; flex: none; }
+.drift-none { color: var(--sk-text-faint, #aaa); }
 </style>
