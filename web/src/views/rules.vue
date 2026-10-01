@@ -69,7 +69,7 @@
             </SkFormField>
             <div class="span-2">
               <SkFormField name="desc" label="说明">
-                <LgTextarea v-model="form.description" :rows="2" placeholder="如：种子/演示数据中的手机号按口径豁免，负责人 terence" />
+                <LgTextarea v-model="form.description" :rows="2" placeholder="写清三件事：为什么扫它？误报怎么豁免？出了问题找谁？" />
               </SkFormField>
             </div>
           </div>
