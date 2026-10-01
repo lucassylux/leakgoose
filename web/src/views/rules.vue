@@ -4,7 +4,7 @@
       <SkFormField label="ID / 名称" name="f">
         <SkInput v-model="query.q" placeholder="请输入" clearable @keyup.enter="load" />
       </SkFormField>
-      <SkFormField label="启停" name="f">
+      <SkFormField label="状态" name="f">
         <SkSelect v-model="query.enabled" placeholder="全部" clearable :options="enabledOptions" />
       </SkFormField>
       <SkFormField name="f">
