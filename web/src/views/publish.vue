@@ -4,7 +4,7 @@
       <div class="pub-row">
         <div v-if="latest" class="latest" style="flex: 1">
           当前已发布：<b>{{ latest.version }}</b>
-          <span class="mono">sha256 {{ latest.sha256.slice(0, 12) }}…</span>
+          <span class="mono sha-full" title="点击复制完整 sha256" @click="copySha(latest.sha256)">sha256 {{ latest.sha256 }}</span>
           <span>{{ fmtTime(latest.publishedAt) }} · {{ latest.publishedBy }}</span>
           <span class="changelog">{{ latest.changelog }}</span>
         </div>
@@ -119,6 +119,15 @@ const publish = async () => {
   }
 }
 
+const copySha = async (sha: string) => {
+  try {
+    await navigator.clipboard.writeText(sha)
+    skMessage.success('sha256 已复制')
+  } catch {
+    skMessage.warning('复制失败，请手动选择复制')
+  }
+}
+
 const viewYaml = async (version: string) => {
   const text = await fetch(`/api/packs/${version}.yaml`, { credentials: 'same-origin' }).then(r => {
     if (!r.ok) throw new Error(`拉取失败 ${r.status}`)
@@ -135,5 +144,7 @@ const viewYaml = async (version: string) => {
 .pub-label { font-size: 13px; color: var(--sk-text-muted); margin-bottom: 6px; }
 .latest { margin-top: 12px; font-size: 13px; color: var(--sk-text-muted); display: flex; gap: 12px; flex-wrap: wrap; }
 .latest .changelog::before { content: '· '; }
+.latest .sha-full { cursor: pointer; word-break: break-all; }
+.latest .sha-full:hover { color: var(--sk-text); }
 .no-perm { margin-top: 8px; font-size: 12px; color: var(--sk-warning, #d48806); }
 </style>
