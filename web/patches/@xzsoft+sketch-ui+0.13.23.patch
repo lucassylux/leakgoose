@@ -1,4 +1,3 @@
-diff --git a/node_modules/@xzsoft/sketch-ui/components/SkSelect.vue b/node_modules/@xzsoft/sketch-ui/components/SkSelect.vue
 --- a/node_modules/@xzsoft/sketch-ui/components/SkSelect.vue
 +++ b/node_modules/@xzsoft/sketch-ui/components/SkSelect.vue
 @@ -34,7 +34,8 @@
@@ -11,3 +10,23 @@ diff --git a/node_modules/@xzsoft/sketch-ui/components/SkSelect.vue b/node_modul
          <button type="button" class="sk-select-multi-op" :disabled="!hasSelection" @click="clearAll">清空</button>
          <button type="button" class="sk-select-multi-op is-done" @click="open = false">完成</button>
        </div>
+--- a/node_modules/@xzsoft/sketch-ui/components/SkFormField.vue
++++ b/node_modules/@xzsoft/sketch-ui/components/SkFormField.vue
+@@ -44,7 +44,16 @@
+ 
+ function inputValue(): string {
+   const input = rootRef.value?.querySelector('input, select, textarea') as HTMLInputElement | null
+-  return input ? input.value : ''
++  if (input) return input.value
++  // [leakgoose patch] SkSelect 自绘触发器无原生表单元素（button+span），required 校验读不到值：
++  // 无原生控件时回退读 SkSelect 的选中标签（has-value 才算有值，占位文本不计）
++  const sel = rootRef.value?.querySelector('.sk-select-multi')
++  if (sel?.classList.contains('has-value')) {
++    const labels = [...sel.querySelectorAll('.sk-select-single-label, .sk-select-multi-tag')]
++      .map(e => e.textContent ?? '')
++    if (labels.length) return labels.join(',')
++  }
++  return ''
+ }
+ 
+ function validate(): string | null {
