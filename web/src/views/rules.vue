@@ -59,7 +59,7 @@
               <SkSelect v-model="form.severity" :options="sevOptions" />
             </SkFormField>
             <SkFormField name="validate" label="验真函数">
-              <SkSelect v-model="form.validate" clearable placeholder="（无）" :options="validateOptions" />
+              <SkSelect v-model="form.validate" clearable placeholder="请选择" :options="validateOptions" />
             </SkFormField>
             <SkFormField name="paths" label="路径排除">
               <SkInput v-model="excludePathsText" placeholder="逗号分隔，如 **/test/**, docs/**" />
