@@ -18,6 +18,7 @@ type testApp struct {
 	t       *testing.T
 	srv     *httptest.Server
 	store   *Store
+	adminPw string       // 首启生成的管理员口令（改密等用例需要）
 	session *http.Client // 带 cookie 的客户端（登录后）
 }
 
@@ -34,7 +35,7 @@ func newTestApp(t *testing.T) *testApp {
 	t.Cleanup(func() { srv.Close(); _ = store.Close() })
 
 	jar, _ := cookiejar.New(nil)
-	app := &testApp{t: t, srv: srv, store: store, session: &http.Client{Jar: jar}}
+	app := &testApp{t: t, srv: srv, store: store, adminPw: adminPw, session: &http.Client{Jar: jar}}
 	app.login("admin", adminPw)
 	return app
 }

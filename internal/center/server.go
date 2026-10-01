@@ -51,6 +51,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/oidc/config", s.handleOidcConfig)
 	mux.HandleFunc("GET /api/auth/oidc/login", s.handleOidcLogin)
 	mux.HandleFunc("POST /api/auth/oidc/callback", s.handleOidcCallback)
+	mux.HandleFunc("POST /api/auth/password", s.requireUI(s.handleChangePassword))
+	mux.HandleFunc("GET /api/settings/session", s.requireRole("admin", s.handleSessionSettingsGet))
+	mux.HandleFunc("PUT /api/settings/session", s.requireRole("admin", s.handleSessionSettingsPut))
 	mux.HandleFunc("GET /api/auth/oidc/settings", s.requireRole("admin", s.handleOidcSettingsGet))
 	mux.HandleFunc("PUT /api/auth/oidc/settings", s.requireRole("admin", s.handleOidcSettingsPut))
 
@@ -190,6 +193,59 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, u *User) {
 	writeJSON(w, http.StatusOK, u)
+}
+
+// handleChangePassword POST /api/auth/password：本地账号自助改密。
+// SSO 绑定用户无本地密码（随机值），明确拒绝引导走 SSO
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, u *User) {
+	var body struct{ OldPassword, NewPassword string }
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if u.Subject != "" {
+		writeErr(w, http.StatusBadRequest, "SSO 账号无本地密码，请使用 SSO 登录")
+		return
+	}
+	if len(body.NewPassword) < 8 {
+		writeErr(w, http.StatusBadRequest, "新密码至少 8 位")
+		return
+	}
+	current, err := s.store.GetUser(u.Username)
+	if err != nil || !bcryptCompare(current.PasswordHash, body.OldPassword) {
+		writeErr(w, http.StatusUnauthorized, "原密码错误")
+		return
+	}
+	hash, err := bcryptHash(body.NewPassword)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.store.UpdatePassword(u.Username, hash); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.store.Audit(u.Username, "update", "user/"+u.Username+"/password", "")
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// ---------- 会话设置 ----------
+
+func (s *Server) handleSessionSettingsGet(w http.ResponseWriter, _ *http.Request, _ *User) {
+	writeJSON(w, http.StatusOK, map[string]any{"ttlHours": s.store.SessionTTLHours()})
+}
+
+func (s *Server) handleSessionSettingsPut(w http.ResponseWriter, r *http.Request, u *User) {
+	var body struct{ TtlHours int }
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if body.TtlHours < 1 || body.TtlHours > 168 {
+		writeErr(w, http.StatusBadRequest, "会话时长需在 1-168 小时之间")
+		return
+	}
+	s.store.SettingSet("session_ttl_hours", fmt.Sprint(body.TtlHours))
+	_ = s.store.Audit(u.Username, "update", "settings/session", fmt.Sprintf("%dh", body.TtlHours))
+	s.handleSessionSettingsGet(w, r, nil)
 }
 
 func (s *Server) sessionUser(r *http.Request) *User {

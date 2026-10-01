@@ -133,7 +133,6 @@ leakgoose rules sync https://center.internal:8280/api/packs/2026.09.30-1.yaml --
 OIDC_ISSUER=http://localhost:8080 \        # WatchGoose 的 issuer
 OIDC_CLIENT_ID=leakgoose-center \           # 管理台「应用接入」注册（PKCE 公开客户端可无 secret）
 OIDC_ALLOWED_USERS=admin,terence \          # 白名单：空 = SSO 整套休眠，仅本地账号登录
-OIDC_ADMIN_USERS=admin \                    # 管理员名单：名单内登录即 admin，其余 viewer
 leakgoose center serve -listen :8280 -db center.db
 ```
 

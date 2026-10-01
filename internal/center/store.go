@@ -357,6 +357,27 @@ func (s *Store) GetUser(username string) (*User, error) {
 	return u, err
 }
 
+// UpdatePassword 本地账号改密（已 bcrypt 的哈希直接落库）
+func (s *Store) UpdatePassword(username, passwordHash string) error {
+	res, err := s.db.Exec(`UPDATE users SET password_hash=? WHERE username=?`, passwordHash, username)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SessionTTLHours 会话时长（settings.session_ttl_hours；缺省/非法回退 12，范围 1-168）
+func (s *Store) SessionTTLHours() int {
+	var v int
+	if _, err := fmt.Sscan(s.SettingGet("session_ttl_hours"), &v); err != nil || v < 1 || v > 168 {
+		return 12
+	}
+	return v
+}
+
 // GetUserBySubject 按 OIDC sub 取（SSO 用户的唯一绑定键）
 func (s *Store) GetUserBySubject(subject string) (*User, error) {
 	u := &User{}

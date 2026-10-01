@@ -1,9 +1,11 @@
 package center
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"path/filepath"
 	"strings"
@@ -278,4 +280,43 @@ func TestDictCRUDAndSeed(t *testing.T) {
 	if len(demo) != 1 || !demo[0].Enabled {
 		t.Fatalf("enabled 过滤: %+v", demo)
 	}
+}
+
+func TestChangePasswordAndSessionSettings(t *testing.T) {
+	app := newTestApp(t)
+	// 会话设置：默认 12，越界拒绝，合法值持久化
+	_, m, _ := app.do("GET", "/api/settings/session", nil)
+	if m["ttlHours"] != float64(12) {
+		t.Fatalf("默认会话时长: %v", m["ttlHours"])
+	}
+	if code, m, _ := app.do("PUT", "/api/settings/session", map[string]any{"ttlHours": 300}); code != 400 {
+		t.Fatalf("越界应 400: %d %v", code, m)
+	}
+	if code, _, _ := app.do("PUT", "/api/settings/session", map[string]any{"ttlHours": 24}); code != 200 {
+		t.Fatalf("合法值保存失败: %d", code)
+	}
+	_, m, _ = app.do("GET", "/api/settings/session", nil)
+	if m["ttlHours"] != float64(24) {
+		t.Fatalf("未持久化: %v", m)
+	}
+
+	// 改密：旧密码错误拒绝；新密码过短拒绝；正确流转生效
+	if code, _, _ := app.do("POST", "/api/auth/password", map[string]any{"oldPassword": "wrong", "newPassword": "NewPass#2026"}); code != 401 {
+		t.Fatalf("旧密码错误应 401")
+	}
+	if code, _, _ := app.do("POST", "/api/auth/password", map[string]any{"oldPassword": app.adminPw, "newPassword": "short"}); code != 400 {
+		t.Fatalf("过短应 400")
+	}
+	if code, _, _ := app.do("POST", "/api/auth/password", map[string]any{"oldPassword": app.adminPw, "newPassword": "NewPass#2026"}); code != 200 {
+		t.Fatal("改密失败")
+	}
+	// 新密码能登录（新客户端）
+	jar2, _ := cookiejar.New(nil)
+	c2 := &http.Client{Jar: jar2}
+	body, _ := json.Marshal(map[string]string{"username": "admin", "password": "NewPass#2026"})
+	resp, err := c2.Post(app.srv.URL+"/api/auth/login", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("新密码登录失败: %v %v", resp, err)
+	}
+	resp.Body.Close()
 }

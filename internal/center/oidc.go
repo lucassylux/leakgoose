@@ -57,7 +57,6 @@ func (s *Store) seedOIDCEnv() {
 		{"OIDC_CLIENT_ID", "oidc_client_id"},
 		{"OIDC_CLIENT_SECRET", "oidc_client_secret"},
 		{"OIDC_ALLOWED_USERS", "oidc_allowed_users"},
-		{"OIDC_ADMIN_USERS", "oidc_admin_users"},
 		{"OIDC_REDIRECT_BASE", "oidc_redirect_base"},
 	}
 	for _, p := range pairs {
@@ -261,11 +260,9 @@ func (s *Server) handleOidcCallback(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "该 SSO 账号未在白名单中")
 		return
 	}
-	// 角色列表权威：admin 列表 → admin，否则 viewer（每次登录同步；本地手工改库会被纠正回列表口径）
-	role := "viewer"
-	if oidcAllow(s.store.SettingGet("oidc_admin_users"), identity) {
-		role = "admin"
-	}
+	// 白名单制：SSO 用户固定「编辑」角色（可维护规则草稿/用例）；发布、令牌、系统设置
+	// 属管理面，走本地管理员账号——不再维护单独的管理员名单
+	role := "editor"
 	u, err := s.store.UpsertSSOUser(identity, idClaims.Sub, role)
 	if errors.Is(err, ErrConflict) {
 		writeErr(w, http.StatusForbidden, err.Error())
@@ -287,12 +284,13 @@ func (s *Server) issueSession(w http.ResponseWriter, u User) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	ttl := time.Duration(s.store.SessionTTLHours()) * time.Hour
 	s.mu.Lock()
-	s.sessions[tok] = session{User: u, Expires: time.Now().Add(sessionTTL)}
+	s.sessions[tok] = session{User: u, Expires: time.Now().Add(ttl)}
 	s.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name: "lg_center_session", Value: tok, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, MaxAge: int(sessionTTL.Seconds()),
+		SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds()),
 	})
 }
 
@@ -334,7 +332,6 @@ func (s *Server) handleOidcSettingsGet(w http.ResponseWriter, _ *http.Request, _
 		"clientSecretSet": s.store.SettingGet("oidc_client_secret") != "",
 		"redirectBase":    s.store.SettingGet("oidc_redirect_base"),
 		"allowedUsers":    s.store.SettingGet("oidc_allowed_users"),
-		"adminUsers":      s.store.SettingGet("oidc_admin_users"),
 		"enabled":         s.store.oidcEnabled(),
 	})
 }
@@ -349,7 +346,6 @@ func (s *Server) handleOidcSettingsPut(w http.ResponseWriter, r *http.Request, _
 		ClientSecret *string `json:"clientSecret"`
 		RedirectBase *string `json:"redirectBase"`
 		AllowedUsers *string `json:"allowedUsers"`
-		AdminUsers   *string `json:"adminUsers"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -372,7 +368,6 @@ func (s *Server) handleOidcSettingsPut(w http.ResponseWriter, r *http.Request, _
 	set("oidc_client_id", req.ClientID)
 	set("oidc_redirect_base", req.RedirectBase)
 	set("oidc_allowed_users", req.AllowedUsers)
-	set("oidc_admin_users", req.AdminUsers)
 	if req.ClientSecret != nil {
 		v := strings.TrimSpace(*req.ClientSecret)
 		if v == "-" {
